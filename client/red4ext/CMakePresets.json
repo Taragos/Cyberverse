@@ -16,7 +16,29 @@
           "CMAKE_TOOLCHAIN_FILE": {
             "type": "FILEPATH",
             "value": "$env{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake"
-          }
+          },
+          "VCPKG_OVERLAY_PORTS": "${sourceDir}/cross/ports"
+        }
+      },
+      {
+        "name": "linux-cross",
+        "displayName": "Windows plugin from Linux",
+        "description": "Cross-compile for x64 Windows with clang-cl + lld-link + xwin. Run through tools/linux/build-client.sh.",
+        "binaryDir": "${sourceDir}/build/${presetName}",
+        "generator": "Ninja",
+        "cacheVariables": {
+          "CMAKE_BUILD_TYPE": "Release",
+          "CMAKE_TOOLCHAIN_FILE": {
+            "type": "FILEPATH",
+            "value": "$env{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake"
+          },
+          "VCPKG_CHAINLOAD_TOOLCHAIN_FILE": "${sourceDir}/cross/toolchain-clangcl.cmake",
+          "VCPKG_TARGET_TRIPLET": "x64-windows-clangcl",
+          "VCPKG_HOST_TRIPLET": "x64-linux",
+          "VCPKG_OVERLAY_TRIPLETS": "${sourceDir}/cross/triplets",
+          "VCPKG_OVERLAY_PORTS": "${sourceDir}/cross/ports",
+          "VCPKG_INSTALL_OPTIONS": "--x-buildtrees-root=${sourceDir}/build/vcpkg-buildtrees;--clean-after-build",
+          "VCPKG_APPLOCAL_DEPS": "OFF"
         }
       }
     ],
@@ -26,6 +48,11 @@
         "configurePreset": "ninja-vcpkg",
         "displayName": "Build ninja-vcpkg",
         "description": "Build ninja-vcpkg Configurations"
+      },
+      {
+        "name": "linux-cross",
+        "configurePreset": "linux-cross",
+        "displayName": "Build linux-cross"
       }
     ],
     "testPresets": [

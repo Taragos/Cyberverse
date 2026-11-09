@@ -18,6 +18,26 @@ set(CMAKE_CXX_STANDARD_REQUIRED YES)
 add_subdirectory(deps/red4ext.sdk)
 set_target_properties(RED4ext.SDK PROPERTIES FOLDER "Dependencies")
 
+# RED4ext.SDK includes a few headers with the wrong case (e.g. RED4ext/rtti/ for the RED4ext/RTTI/ folder), which only
+# works on case-insensitive file systems. When cross-compiling from Linux, give those paths symlinks to the real files.
+if(CMAKE_HOST_UNIX)
+  set(SDK_CASE_FIX_DIR "${CMAKE_BINARY_DIR}/sdk-case-fix")
+  set(SDK_INCLUDE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/deps/red4ext.sdk/include")
+  foreach(mapping
+      "RED4ext/rtti/ERTTIType.hpp=RED4ext/RTTI/ERTTIType.hpp"
+      "RED4ext/rtti/IType.hpp=RED4ext/RTTI/IType.hpp"
+      "RED4ext/rtti/IType-inl.hpp=RED4ext/RTTI/IType-inl.hpp"
+      "RED4ext/Scripting/Natives/AnimKeyFrames.hpp=RED4ext/Scripting/Natives/animKeyFrames.hpp")
+    string(REPLACE "=" ";" mapping "${mapping}")
+    list(GET mapping 0 included_as)
+    list(GET mapping 1 actual_file)
+    get_filename_component(link_dir "${SDK_CASE_FIX_DIR}/${included_as}" DIRECTORY)
+    file(MAKE_DIRECTORY "${link_dir}")
+    file(CREATE_LINK "${SDK_INCLUDE_DIR}/${actual_file}" "${SDK_CASE_FIX_DIR}/${included_as}" SYMBOLIC)
+  endforeach()
+  target_include_directories(RED4ext.SDK PUBLIC "$<BUILD_INTERFACE:${SDK_CASE_FIX_DIR}>")
+endif()
+
 # This will mark the following RED4ext variables as advanced. They won't be displayed in CMake's GUI.
 mark_as_advanced(
   RED4EXT_BUILD_EXAMPLES

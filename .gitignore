@@ -367,3 +367,5 @@ build/
 .idea/
 cmake-build-debug/
 vcpkg_installed/
+# Copied in by tools/linux/build-server.sh --image (and the CI docker job) for the server image build
+server/protocol/

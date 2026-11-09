@@ -45,3 +45,23 @@ triggering packets, callbacks on packets).
 - RED4ext
 - Redscript
 - Codeware
+## Building on Linux
+Everything builds on Linux with podman (or docker, with `CONTAINER=docker`), including the Windows client plugin,
+which is cross-compiled with clang-cl, lld-link and the MSVC CRT/Windows SDK fetched by
+[xwin](https://github.com/Jake-Shadle/xwin). The first build creates the build image and compiles the dependencies
+(about 10 minutes); later builds take seconds. Building the image accepts Microsoft's license for the CRT and SDK files.
+
+| Command | What it does |
+|---|---|
+| `tools/linux/build-client.sh` | Builds `Cyberverse.Red4Ext.dll` and `GameNetworkingSockets.dll` into `client/red4ext/build/linux-cross/src/` |
+| `tools/linux/install-client.sh` | Copies the plugin and the redscript module into a mod folder of an MO2-style mod manager (Amethyst, MO2) and enables it. Set `CYBERVERSE_STAGING` and `CYBERVERSE_PROFILE` for your setup, then deploy in the mod manager |
+| `tools/linux/run-server.sh` | Builds the server (native library in the build container, C# in the .NET SDK container) and starts it on UDP port 1337. Needs the .NET 10 runtime on the host |
+| `tools/linux/build-server.sh --image` | Builds the deployable server image (`server/Dockerfile`) |
+
+To join, start the game with `--cyberverse-server-address=<ip> --cyberverse-server-port=1337` (with Steam, after
+`%command%` in the launch options). Under Proton, RED4ext also needs `WINEDLLOVERRIDES="winmm,version=n,b"`.
+
+Files for the cross-build are in `client/red4ext/cross/`. Two choices there apply to the client in general:
+GameNetworkingSockets uses Windows' BCrypt instead of OpenSSL in both the Windows and the Linux build (an overlay port,
+since vcpkg can't build OpenSSL for Windows from Linux), and in the cross-build its dependencies (protobuf, abseil) are
+linked into `GameNetworkingSockets.dll` statically.

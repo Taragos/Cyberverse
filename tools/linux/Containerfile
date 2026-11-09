@@ -1,0 +1,42 @@
+# Build environment for the Windows client plugin on Linux: clang-cl + lld-link + the MSVC CRT and Windows SDK from
+# xwin, plus vcpkg at the manifests' baseline, plus gcc for the Linux server library. Used by the scripts in this
+# folder (see container.sh); works with podman or docker.
+FROM docker.io/library/ubuntu:24.04
+
+ARG LLVM_VERSION=21
+ARG XWIN_VERSION=0.10.0
+# Pinned so a new MSVC STL can't break the build without a change here. Keep -fms-compatibility-version in
+# client/red4ext/cross/toolchain-clangcl.cmake in step with the CRT version (14.44 = MSVC 19.44).
+ARG XWIN_CRT_VERSION=14.44.17.14
+ARG XWIN_SDK_VERSION=10.0.26100
+ARG VCPKG_COMMIT=74e6536215718009aae747d86d84b78376bf9e09
+
+ENV DEBIAN_FRONTEND=noninteractive
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        ca-certificates curl git gnupg lsb-release software-properties-common wget \
+        build-essential cmake ninja-build pkg-config python3 zip unzip tar \
+    && rm -rf /var/lib/apt/lists/*
+
+# LLVM from apt.llvm.org; Ubuntu 24.04 itself only has LLVM 18.
+RUN curl -fsSL https://apt.llvm.org/llvm.sh -o /tmp/llvm.sh \
+    && bash /tmp/llvm.sh ${LLVM_VERSION} \
+    && apt-get install -y --no-install-recommends lld-${LLVM_VERSION} llvm-${LLVM_VERSION} \
+    && rm -rf /var/lib/apt/lists/* /tmp/llvm.sh
+ENV PATH=/usr/lib/llvm-${LLVM_VERSION}/bin:$PATH
+
+# MSVC CRT + Windows SDK. Running this accepts Microsoft's license for those files (https://go.microsoft.com/fwlink/?LinkId=2086102).
+RUN curl -fsSL https://github.com/Jake-Shadle/xwin/releases/download/${XWIN_VERSION}/xwin-${XWIN_VERSION}-x86_64-unknown-linux-musl.tar.gz \
+        | tar -xz -C /tmp \
+    && /tmp/xwin-${XWIN_VERSION}-x86_64-unknown-linux-musl/xwin --accept-license --arch x86_64 \
+        --crt-version ${XWIN_CRT_VERSION} --sdk-version ${XWIN_SDK_VERSION} \
+        splat --output /opt/xwin \
+    && rm -rf /tmp/xwin-* /root/.xwin-cache .xwin-cache
+ENV XWIN_DIR=/opt/xwin
+
+# vcpkg needs its git history to resolve the manifest's builtin-baseline.
+RUN git clone https://github.com/microsoft/vcpkg /opt/vcpkg \
+    && git -C /opt/vcpkg checkout ${VCPKG_COMMIT} \
+    && /opt/vcpkg/bootstrap-vcpkg.sh -disableMetrics
+ENV VCPKG_ROOT=/opt/vcpkg
+
+WORKDIR /src

@@ -25,3 +25,11 @@ target_link_libraries(${CMAKE_PROJECT_NAME} PRIVATE zpp_bits)
 target_link_libraries(${CMAKE_PROJECT_NAME} PRIVATE GameNetworkingSockets::shared)
 target_link_libraries(${CMAKE_PROJECT_NAME} PRIVATE RedLib)
 target_link_libraries(${CMAKE_PROJECT_NAME} PRIVATE protocol)
+
+# vcpkg copies the dependencies' DLLs next to the plugin with PowerShell, which doesn't exist when cross-compiling from
+# Linux (VCPKG_APPLOCAL_DEPS is off there), so copy them with CMake instead.
+if(CMAKE_HOST_UNIX)
+  add_custom_command(TARGET ${CMAKE_PROJECT_NAME} POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different $<TARGET_RUNTIME_DLLS:${CMAKE_PROJECT_NAME}> $<TARGET_FILE_DIR:${CMAKE_PROJECT_NAME}>
+    COMMAND_EXPAND_LISTS)
+endif()

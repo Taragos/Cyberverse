@@ -81,14 +81,13 @@ RTTI_DEFINE_CLASS(NetworkGameSystem, {
     RTTI_ALIAS("Cyberverse.Network.Managers.NetworkGameSystem");
 });
 
-// TODO: Thing about the concept of having EnqueueMessage public, it causes _this_, at least with templates: We need to
-//  expliticly state template invocations for the code to be generated, as otherwise NetworkGameSystem.cpp doesn't know
-//  about PlayerActionTracked. Maybe we could also inline the whole EnqueueMessage code, then it will be emited into the
-//  relevant caller CU (but that may be more than one for the same packet, making template hell even worse).
-template bool NetworkGameSystem::EnqueueMessage(uint8_t channel_id, PlayerActionTracked msg);
-template bool NetworkGameSystem::EnqueueMessage(uint8_t channel_id, PlayerSpawnCar msg);
-template bool NetworkGameSystem::EnqueueMessage(uint8_t channel_id, PlayerUnmountCar msg);
-template bool NetworkGameSystem::EnqueueMessage(uint8_t channel_id, PlayerEquipItem msg);
-template bool NetworkGameSystem::EnqueueMessage(uint8_t channel_id, PlayerShoot msg);
+// EnqueueMessage is defined in NetworkGameSystem.cpp, so the packet types sent from other files are instantiated there
+// (see the end of EnqueueMessage) and only declared here. Add a line in both places when another file sends a new packet.
+// TODO: Think about the concept of having EnqueueMessage public; maybe inline it instead.
+extern template bool NetworkGameSystem::EnqueueMessage(uint8_t channel_id, PlayerActionTracked msg);
+extern template bool NetworkGameSystem::EnqueueMessage(uint8_t channel_id, PlayerSpawnCar msg);
+extern template bool NetworkGameSystem::EnqueueMessage(uint8_t channel_id, PlayerUnmountCar msg);
+extern template bool NetworkGameSystem::EnqueueMessage(uint8_t channel_id, PlayerEquipItem msg);
+extern template bool NetworkGameSystem::EnqueueMessage(uint8_t channel_id, PlayerShoot msg);
 
 #endif //NETWORKMANAGERCONTROLLER_H

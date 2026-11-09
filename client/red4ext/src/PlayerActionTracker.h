@@ -12,6 +12,8 @@
 #include "RED4ext/Scripting/Natives/Generated/game/projectile/ShootEvent.hpp"
 #include "RED4ext/Scripting/Natives/Generated/game/weapon/Object.hpp"
 
+#include "CompleteTypes.h"
+
 class PlayerActionTracker final : public Red::IScriptable
 {
 public:

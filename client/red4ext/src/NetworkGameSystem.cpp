@@ -193,6 +193,13 @@ bool NetworkGameSystem::EnqueueMessage(uint8_t channel_id, T content)
     return false;
 }
 
+// The packet types other files send (declared extern in NetworkGameSystem.h).
+template bool NetworkGameSystem::EnqueueMessage(uint8_t channel_id, PlayerActionTracked msg);
+template bool NetworkGameSystem::EnqueueMessage(uint8_t channel_id, PlayerSpawnCar msg);
+template bool NetworkGameSystem::EnqueueMessage(uint8_t channel_id, PlayerUnmountCar msg);
+template bool NetworkGameSystem::EnqueueMessage(uint8_t channel_id, PlayerEquipItem msg);
+template bool NetworkGameSystem::EnqueueMessage(uint8_t channel_id, PlayerShoot msg);
+
 void NetworkGameSystem::SetEntityPosition(const RED4ext::ent::EntityID entityId, RED4ext::Vector4 worldPosition, float yaw)
 {
     const auto entity = Cyberverse::Utils::GetDynamicEntity(entityId);

@@ -97,6 +97,33 @@ public native class NetworkGameSystem extends IGameSystem {
         return teleportCommand;
     }
 
+    // Remote puppets' walk animation (CYB-00010): the plugin builds the native AnimFeature_Locomotion each frame
+    // (redscript can't create it) and hands it here. Which input name the NPC graph reads isn't known yet, so it goes
+    // out under the candidates at once; only NPC puppets get it, not cars or items.
+    public func ApplyLocomotion(entity: ref<Entity>, feature: ref<AnimFeature>) -> Void {
+        let puppet = entity as NPCPuppet;
+        if !IsDefined(puppet) {
+            return;
+        }
+        AnimationControllerComponent.ApplyFeature(puppet, n"Locomotion", feature);
+        AnimationControllerComponent.ApplyFeature(puppet, n"locomotion", feature);
+        AnimationControllerComponent.ApplyFeature(puppet, n"LocomotionFeature", feature);
+        AnimationControllerComponent.ApplyFeature(puppet, n"Movement", feature);
+    }
+
+    // The length of one of the puppet's animations in seconds (e.g. walk_0); 0 or less when unknown.
+    public func AnimationLength(entity: ref<Entity>, animation: CName) -> Float {
+        let puppet = entity as ScriptedPuppet;
+        if !IsDefined(puppet) {
+            return -1.0;
+        }
+        let animationController = puppet.GetAnimationControllerComponent();
+        if !IsDefined(animationController) {
+            return -1.0;
+        }
+        return animationController.GetAnimationDuration(animation);
+    }
+
     public func StopAICommand(puppet: ref<ScriptedPuppet>, command: ref<AICommand>) {
         let component = puppet.GetAIControllerComponent();
         if (EnumInt(component.GetCommandState(command)) != EnumInt(AICommandState.Success)) {

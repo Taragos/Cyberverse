@@ -9,6 +9,7 @@
 
 #include "PlayerActionTracker.h"
 #include "PlayerSync/InterpolationData.h"
+#include "PlayerSync/RemoteLocomotion.h"
 #include "RED4ext/Scripting/Natives/Generated/AI/Command.hpp"
 #include "RED4ext/Scripting/Natives/Generated/Vector4.hpp"
 #include "RED4ext/Scripting/Natives/entEntityID.hpp"
@@ -34,6 +35,9 @@ private:
     std::map<RED4ext::ent::EntityID, InterpolationData> m_interpolationData;
     std::map<RED4ext::ent::EntityID, RED4ext::Handle<RED4ext::AICommand>> m_LastTeleportCommand;
     float m_TimeSinceLastPlayerPositionSync;
+    // Remote puppets' walk animation (CYB-00010), and the plugin's clock in seconds.
+    Cyberverse::PlayerSync::RemoteLocomotion m_remoteLocomotion;
+    float m_clock = 0.0f;
     // Written on a network worker thread, taken by the main menu on the UI thread.
     std::mutex m_loginRejectedMutex;
     std::string m_loginRejectedMessage;

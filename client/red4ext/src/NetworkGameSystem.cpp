@@ -24,6 +24,8 @@
 #include <lmcons.h> // UNLEN
 #include <shellapi.h> // ShellExecuteW
 
+#include <algorithm>
+#include <cmath>
 #include <thread>
 
 bool NetworkGameSystem::Load()
@@ -168,9 +170,11 @@ void NetworkGameSystem::OnNetworkUpdate(RED4ext::FrameInfo& frame_info, RED4ext:
         return;
     }
 
+    m_clock += frame_info.deltaTime;
     PollIncomingMessages();
     TrackPlayerPosition(frame_info.deltaTime);
     InterpolatePuppets(frame_info.deltaTime);
+    m_remoteLocomotion.Tick(this, frame_info.deltaTime, m_clock);
 
     m_pInterface->RunCallbacks(); // This shall be called in a loop.
 }
@@ -395,6 +399,8 @@ void NetworkGameSystem::SetEntityPosition(const RED4ext::ent::EntityID entityId,
     {
         // TODO: Find out if this is an NPCPuppet...
         // AI
+        // The AI teleport command is what moves NPC puppets; TeleportationFacility.Teleport alone reports success
+        // but leaves them where they are (CYB-00010, 2026-11-10).
         RED4ext::Handle<RED4ext::AICommand> commandRef;
         Red::CallVirtual(this, "TeleportPuppet", commandRef, entity.value(), worldPosition, yaw);
         m_LastTeleportCommand[entityId] = commandRef;
@@ -638,6 +644,9 @@ void NetworkGameSystem::PollIncomingMessages()
                 Red::CallVirtual(this, "StopAICommand", entity.value(), commandRef);
             }
 
+            m_remoteLocomotion.OnNetworkPosition(
+                entityId, {teleport.targetPosition.x, teleport.targetPosition.y, teleport.targetPosition.z}, m_clock);
+
             // TODO: This should probably be a map<id, list<data>>, so that a server that eagerly sends too much data doesn't increase interpolation delay
             //  in contrast, we can just increase the time velocity of the interpolator
             const auto interpolation_data = InterpolationData(Cyberverse::Utils::Vector4To3(positionSource), teleport.targetPosition, yawSource, teleport.yaw, 0.1f);
@@ -667,7 +676,12 @@ void NetworkGameSystem::PollIncomingMessages()
                 SDK->logger->Warn(PLUGIN, "Failed to destroy entity!");
             }
 
-            m_networkedEntitiesLookup.erase(entityId);
+            // Keyed by the network id (this erased by the game's entity id before, so a respawn of the same network
+            // id was refused as "already spawned").
+            m_networkedEntitiesLookup.erase(destroy_entity.networkedEntityId);
+            m_interpolationData.erase(entityId);
+            m_LastTeleportCommand.erase(entityId);
+            m_remoteLocomotion.Forget(entityId);
         }
         break;
 

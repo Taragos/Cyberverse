@@ -39,10 +39,12 @@ catch (SchemaException e)
     return 1;
 }
 
+// Always \n: the templates below are raw string literals, which take this file's line endings, and a Windows checkout
+// has CRLF ones.
 var outputs = new Dictionary<string, string>
 {
-    [Path.Combine(root, "shared", "protocol", "Protocol.h")] = CppEmitter.Emit(schema),
-    [Path.Combine(root, "server", "Managed", "Protocol", "Generated", "Protocol.g.cs")] = CsEmitter.Emit(schema),
+    [Path.Combine(root, "shared", "protocol", "Protocol.h")] = Gen.Lf(CppEmitter.Emit(schema)),
+    [Path.Combine(root, "server", "Managed", "Protocol", "Generated", "Protocol.g.cs")] = Gen.Lf(CsEmitter.Emit(schema)),
 };
 
 var stale = 0;
@@ -738,12 +740,18 @@ static class CsEmitter
 
     private static void TrimBlankLine(StringBuilder o)
     {
+        // The templates carry this file's line endings (CRLF in a Windows checkout); make them \n first.
+        var text = o.ToString().ReplaceLineEndings("\n");
+        o.Clear().Append(text);
         while (o.Length > 1 && o[^1] == '\n' && o[^2] == '\n') o.Length--;
     }
 }
 
 static class Gen
 {
+    /// <summary>The text with \n line endings and exactly one newline at the end.</summary>
+    public static string Lf(string text) => text.ReplaceLineEndings("\n").TrimEnd('\n') + "\n";
+
     public static string? FindRepoRoot()
     {
         for (var dir = new DirectoryInfo(Directory.GetCurrentDirectory()); dir != null; dir = dir.Parent)

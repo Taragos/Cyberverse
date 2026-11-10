@@ -35,3 +35,10 @@ inline std::optional<uint16_t> ParsePortFromCommandLine(char* commandLine) {
 
     return std::stoi(portString.value());
 }
+
+/// --cyberverse-dump-types=ClassA,ClassB: classes to describe in the log (see TypeDump.h).
+inline std::optional<std::string> ParseDumpTypesFromCommandLine(char* commandLine) {
+    constexpr auto needle = "--cyberverse-dump-types=";
+    constexpr auto needleLen = std::char_traits<char>::length(needle);
+    return ArgumentFromCommandLineUntilNextSpace(commandLine, needle, needleLen);
+}

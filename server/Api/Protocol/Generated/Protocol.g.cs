@@ -9,7 +9,7 @@ namespace Cyberverse.Server.Protocol;
 public static class ProtocolInfo
 {
     /// <summary>A hash of protocol.yaml. The client sends it at login; the server rejects a different one.</summary>
-    public const uint Version = 0xD94C8427;
+    public const uint Version = 0x26B8A6AD;
 }
 
 public enum EMessageTypeServerbound : ushort
@@ -23,6 +23,10 @@ public enum EMessageTypeServerbound : ushort
     PlayerEquipItem = 7,
     PlayerShoot = 8,
     LoginWithSession = 9,
+    CharacterCreate = 10,
+    CharacterSelect = 11,
+    CharacterDelete = 12,
+    CharacterAppearance = 13,
 }
 
 public enum EMessageTypeClientbound : ushort
@@ -34,6 +38,9 @@ public enum EMessageTypeClientbound : ushort
     EquipItemEntity = 4,
     LoginRequired = 5,
     SessionIssued = 6,
+    CharacterList = 7,
+    CharacterRequestFailed = 8,
+    CharacterSpawned = 9,
 }
 
 /// <summary>ValidationFailed covers everything from a wrong password to being banned. Part of the frozen InitAuthResult.</summary>
@@ -92,6 +99,33 @@ public partial struct Vector3 : IWireType<Vector3>
         if (!reader.TryReadF32(out value.X)) return false;
         if (!reader.TryReadF32(out value.Y)) return false;
         if (!reader.TryReadF32(out value.Z)) return false;
+        return true;
+    }
+}
+
+/// <summary>One entry of the character select screen.</summary>
+public partial struct CharacterInfo : IWireType<CharacterInfo>
+{
+    /// <summary>A GUID. At most 36 bytes.</summary>
+    public string CharacterId;
+    /// <summary>"Firstname Lastname". At most 160 bytes.</summary>
+    public string Name;
+    /// <summary>Seconds since 1970 (UTC) of the last time it was played; 0 for never.</summary>
+    public long LastPlayedUnix;
+
+    public readonly void Write(PacketWriter writer)
+    {
+        writer.WriteString(CharacterId, 36);
+        writer.WriteString(Name, 160);
+        writer.WriteI64(LastPlayedUnix);
+    }
+
+    public static bool TryRead(ref PacketReader reader, out CharacterInfo value)
+    {
+        value = default;
+        if (!reader.TryReadString(36, out value.CharacterId)) return false;
+        if (!reader.TryReadString(160, out value.Name)) return false;
+        if (!reader.TryReadI64(out value.LastPlayedUnix)) return false;
         return true;
     }
 }
@@ -338,6 +372,110 @@ public partial struct LoginWithSession : IServerBoundPacket<LoginWithSession>
     }
 }
 
+/// <summary>Creates a character from the select screen. The server answers with CharacterList or CharacterRequestFailed.</summary>
+public partial struct CharacterCreate : IServerBoundPacket<CharacterCreate>
+{
+    public static ushort MessageId => 10;
+    public static byte Channel => 0;
+    public static bool Reliable => true;
+    public static EMessageTypeServerbound MessageType => EMessageTypeServerbound.CharacterCreate;
+
+    /// <summary>2 to 16 letters, ' and -. At most 64 bytes.</summary>
+    public string FirstName;
+    /// <summary>2 to 16 letters, ' and -. At most 64 bytes.</summary>
+    public string LastName;
+    /// <summary>The character creator's options as the client encodes them; may be empty. At most 16384 bytes.</summary>
+    public string Appearance;
+
+    public readonly void Write(PacketWriter writer)
+    {
+        writer.WriteString(FirstName, 64);
+        writer.WriteString(LastName, 64);
+        writer.WriteString(Appearance, 16384);
+    }
+
+    public static bool TryRead(ref PacketReader reader, out CharacterCreate value)
+    {
+        value = default;
+        if (!reader.TryReadString(64, out value.FirstName)) return false;
+        if (!reader.TryReadString(64, out value.LastName)) return false;
+        if (!reader.TryReadString(16384, out value.Appearance)) return false;
+        return true;
+    }
+}
+
+/// <summary>Plays as this character. The server answers with CharacterSpawned or CharacterRequestFailed.</summary>
+public partial struct CharacterSelect : IServerBoundPacket<CharacterSelect>
+{
+    public static ushort MessageId => 11;
+    public static byte Channel => 0;
+    public static bool Reliable => true;
+    public static EMessageTypeServerbound MessageType => EMessageTypeServerbound.CharacterSelect;
+
+    /// <summary>At most 36 bytes.</summary>
+    public string CharacterId;
+
+    public readonly void Write(PacketWriter writer)
+    {
+        writer.WriteString(CharacterId, 36);
+    }
+
+    public static bool TryRead(ref PacketReader reader, out CharacterSelect value)
+    {
+        value = default;
+        if (!reader.TryReadString(36, out value.CharacterId)) return false;
+        return true;
+    }
+}
+
+/// <summary>Deletes one of the player's characters (an admin can restore it). Answered with CharacterList or CharacterRequestFailed.</summary>
+public partial struct CharacterDelete : IServerBoundPacket<CharacterDelete>
+{
+    public static ushort MessageId => 12;
+    public static byte Channel => 0;
+    public static bool Reliable => true;
+    public static EMessageTypeServerbound MessageType => EMessageTypeServerbound.CharacterDelete;
+
+    /// <summary>At most 36 bytes.</summary>
+    public string CharacterId;
+
+    public readonly void Write(PacketWriter writer)
+    {
+        writer.WriteString(CharacterId, 36);
+    }
+
+    public static bool TryRead(ref PacketReader reader, out CharacterDelete value)
+    {
+        value = default;
+        if (!reader.TryReadString(36, out value.CharacterId)) return false;
+        return true;
+    }
+}
+
+/// <summary>The appearance of the character being played changed, e.g. at a mirror. Saved; no answer.</summary>
+public partial struct CharacterAppearance : IServerBoundPacket<CharacterAppearance>
+{
+    public static ushort MessageId => 13;
+    public static byte Channel => 0;
+    public static bool Reliable => true;
+    public static EMessageTypeServerbound MessageType => EMessageTypeServerbound.CharacterAppearance;
+
+    /// <summary>At most 16384 bytes.</summary>
+    public string Appearance;
+
+    public readonly void Write(PacketWriter writer)
+    {
+        writer.WriteString(Appearance, 16384);
+    }
+
+    public static bool TryRead(ref PacketReader reader, out CharacterAppearance value)
+    {
+        value = default;
+        if (!reader.TryReadString(16384, out value.Appearance)) return false;
+        return true;
+    }
+}
+
 /// <summary>The answer to InitAuth. Frozen, see the top of this file. After any result but Ok the server closes the connection.</summary>
 public partial struct InitAuthResult : IClientBoundPacket<InitAuthResult>
 {
@@ -536,6 +674,106 @@ public partial struct SessionIssued : IClientBoundPacket<SessionIssued>
     {
         value = default;
         if (!reader.TryReadString(128, out value.SessionToken)) return false;
+        return true;
+    }
+}
+
+/// <summary>The player's characters, for the select screen. Sent after PlayerJoinWorld while no character is being played, and after a create or delete.</summary>
+public partial struct CharacterList : IClientBoundPacket<CharacterList>
+{
+    public static ushort MessageId => 7;
+    public static byte Channel => 0;
+    public static bool Reliable => true;
+    public static EMessageTypeClientbound MessageType => EMessageTypeClientbound.CharacterList;
+
+    /// <summary>At most 16 elements.</summary>
+    public CharacterInfo[] Characters;
+    /// <summary>How many characters the account may have.</summary>
+    public byte MaxCharacters;
+
+    public readonly void Write(PacketWriter writer)
+    {
+        writer.WriteCount(Characters?.Length ?? 0, 16);
+        foreach (var item in Characters ?? []) item.Write(writer);
+        writer.WriteU8(MaxCharacters);
+    }
+
+    public static bool TryRead(ref PacketReader reader, out CharacterList value)
+    {
+        value = default;
+        if (!reader.TryReadCount(16, 16, out var charactersCount)) return false;
+        value.Characters = new CharacterInfo[charactersCount];
+        for (var i = 0; i < charactersCount; i++)
+        {
+            if (!CharacterInfo.TryRead(ref reader, out value.Characters[i])) return false;
+        }
+        if (!reader.TryReadU8(out value.MaxCharacters)) return false;
+        return true;
+    }
+}
+
+/// <summary>A CharacterCreate, CharacterSelect or CharacterDelete was refused.</summary>
+public partial struct CharacterRequestFailed : IClientBoundPacket<CharacterRequestFailed>
+{
+    public static ushort MessageId => 8;
+    public static byte Channel => 0;
+    public static bool Reliable => true;
+    public static EMessageTypeClientbound MessageType => EMessageTypeClientbound.CharacterRequestFailed;
+
+    /// <summary>Why, written for the player. At most 1024 bytes.</summary>
+    public string Message;
+
+    public readonly void Write(PacketWriter writer)
+    {
+        writer.WriteString(Message, 1024);
+    }
+
+    public static bool TryRead(ref PacketReader reader, out CharacterRequestFailed value)
+    {
+        value = default;
+        if (!reader.TryReadString(1024, out value.Message)) return false;
+        return true;
+    }
+}
+
+/// <summary>The player now plays this character: also sent again after a repeated PlayerJoinWorld (e.g. a reload). The client moves the player to position when teleport is set and applies the appearance.</summary>
+public partial struct CharacterSpawned : IClientBoundPacket<CharacterSpawned>
+{
+    public static ushort MessageId => 9;
+    public static byte Channel => 0;
+    public static bool Reliable => true;
+    public static EMessageTypeClientbound MessageType => EMessageTypeClientbound.CharacterSpawned;
+
+    /// <summary>At most 36 bytes.</summary>
+    public string CharacterId;
+    /// <summary>At most 160 bytes.</summary>
+    public string Name;
+    /// <summary>False for a new character: it stays where the game loaded.</summary>
+    public bool Teleport;
+    public Vector3 Position;
+    public float Yaw;
+    /// <summary>At most 16384 bytes.</summary>
+    public string Appearance;
+
+    public readonly void Write(PacketWriter writer)
+    {
+        writer.WriteString(CharacterId, 36);
+        writer.WriteString(Name, 160);
+        writer.WriteBool(Teleport);
+        Position.Write(writer);
+        writer.WriteF32(Yaw);
+        writer.WriteString(Appearance, 16384);
+    }
+
+    public static bool TryRead(ref PacketReader reader, out CharacterSpawned value)
+    {
+        value = default;
+        if (!reader.TryReadString(36, out value.CharacterId)) return false;
+        if (!reader.TryReadString(160, out value.Name)) return false;
+        if (!reader.TryReadBool(out value.Teleport)) return false;
+        if (!Vector3.TryRead(ref reader, out value.Position)) return false;
+        if (!reader.TryReadF32(out value.Yaw)) return false;
+        if (!reader.TryReadString(16384, out value.Appearance)) return false;
         return true;
     }
 }

@@ -24,6 +24,12 @@ if pgrep -f 'Cyberpunk2077\.exe' >/dev/null; then
     exit 1
 fi
 
+# Scripts that don't compile would reach the game folder through the hardlinks right away, and redscript then refuses
+# every script mod at the next start. CYBERVERSE_SKIP_SCRIPT_CHECK=1 skips this (e.g. without Wine).
+if [[ "${CYBERVERSE_SKIP_SCRIPT_CHECK:-}" != 1 ]]; then
+    "$repo/tools/linux/check-scripts.sh" || { echo "Not installed: the redscript module doesn't compile." >&2; exit 1; }
+fi
+
 # Drop files that the current build no longer produces (e.g. DLLs of dependencies that are now linked statically).
 for dir in "$mod/red4ext/plugins/Cyberverse" "$mod/r6/scripts/Cyberverse"; do
     [[ -d "$dir" ]] || continue
@@ -60,3 +66,15 @@ grep -qx '+Cyberverse' "$modlist" || printf '+Cyberverse\n' >> "$modlist"
 echo "Installed into $mod:"
 find "$mod" -type f ! -name meta.ini | sed "s|$mod/|  |"
 echo "Enabled in profile '$profile'. First install: restart (or refresh) the mod manager so it indexes the new mod, then deploy."
+
+# Hardlinked deploys only update files the mod manager already knows; new files need a refresh and a deploy, or the
+# game runs scripts that import missing ones and redscript fails to compile.
+game="${CYBERVERSE_GAME:-/mnt/nvme/SteamLibrary/steamapps/common/Cyberpunk 2077}"
+if [[ -d "$game" ]]; then
+    missing="$(cd "$mod" && find . -type f ! -name meta.ini | while read -r f; do [[ -e "$game/$f" ]] || echo "  ${f#./}"; done)"
+    if [[ -n "$missing" ]]; then
+        echo
+        echo "Not in the game folder yet (refresh the mod manager, then deploy):"
+        echo "$missing"
+    fi
+fi

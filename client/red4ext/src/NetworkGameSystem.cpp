@@ -2,6 +2,7 @@
 
 #include "CommandLine.h"
 #include "SessionStore.h"
+#include "TypeDump.h"
 #include "Main.h"
 #include "Utils.h"
 
@@ -150,6 +151,10 @@ void NetworkGameSystem::OnNetworkUpdate(RED4ext::FrameInfo& frame_info, RED4ext:
         {
             ConnectToServer(host.value(), port.value());
         }
+        if (const auto types = ParseDumpTypesFromCommandLine(commandLine); types.has_value())
+        {
+            Cyberverse::TypeDump::DumpClasses(types.value());
+        }
         m_hasTriedToConnect = true; // We lie here, to prevent parsing the cli every time.
     }
 
@@ -239,7 +244,89 @@ Red::CString NetworkGameSystem::TakeLoginPrompt()
 
 void NetworkGameSystem::Log(const Red::CString& message)
 {
-    SDK->logger->InfoF(PLUGIN, "[script] %s", message.c_str());
+    // The thread id tells the UI thread from job workers (CYB-00023).
+    SDK->logger->InfoF(PLUGIN, "[script t%lu] %s", GetCurrentThreadId(), message.c_str());
+}
+
+int32_t NetworkGameSystem::GetCharacterCount()
+{
+    std::lock_guard lock(m_charactersMutex);
+    return static_cast<int32_t>(m_characters.size());
+}
+
+Red::CString NetworkGameSystem::GetCharacterId(const int32_t index)
+{
+    std::lock_guard lock(m_charactersMutex);
+    if (index < 0 || index >= static_cast<int32_t>(m_characters.size()))
+    {
+        return {};
+    }
+    return {m_characters[index].characterId.c_str()};
+}
+
+Red::CString NetworkGameSystem::GetCharacterName(const int32_t index)
+{
+    std::lock_guard lock(m_charactersMutex);
+    if (index < 0 || index >= static_cast<int32_t>(m_characters.size()))
+    {
+        return {};
+    }
+    return {m_characters[index].name.c_str()};
+}
+
+int32_t NetworkGameSystem::GetMaxCharacters()
+{
+    std::lock_guard lock(m_charactersMutex);
+    return m_maxCharacters;
+}
+
+bool NetworkGameSystem::CreateCharacter(const Red::CString& firstName, const Red::CString& lastName)
+{
+    if (!FullyConnected)
+    {
+        return false;
+    }
+
+    CharacterCreate create = {};
+    create.firstName = firstName.c_str();
+    create.lastName = lastName.c_str();
+    return EnqueueMessage(create); // The look follows from the editor after the first Play (SendCharacterAppearance).
+}
+
+bool NetworkGameSystem::SelectCharacter(const Red::CString& characterId)
+{
+    if (!FullyConnected)
+    {
+        return false;
+    }
+
+    CharacterSelect select = {};
+    select.characterId = characterId.c_str();
+    return EnqueueMessage(select);
+}
+
+bool NetworkGameSystem::DeleteCharacter(const Red::CString& characterId)
+{
+    if (!FullyConnected)
+    {
+        return false;
+    }
+
+    CharacterDelete request = {};
+    request.characterId = characterId.c_str();
+    return EnqueueMessage(request);
+}
+
+bool NetworkGameSystem::SendCharacterAppearance(const Red::CString& appearance)
+{
+    if (!FullyConnected)
+    {
+        return false;
+    }
+
+    CharacterAppearance request = {};
+    request.appearance = appearance.c_str();
+    return EnqueueMessage(request);
 }
 
 Red::CString NetworkGameSystem::TakeLoginRejectedMessage()
@@ -576,6 +663,57 @@ void NetworkGameSystem::PollIncomingMessages()
             }
 
             m_networkedEntitiesLookup.erase(entityId);
+        }
+        break;
+
+        case EMessageTypeClientbound::CharacterList:
+        {
+            CharacterList list = {};
+            if (zpp::bits::failure(in(list)))
+            {
+                SDK->logger->Error(PLUGIN, "Faulty packet: CharacterList");
+                break;
+            }
+
+            SDK->logger->InfoF(PLUGIN, "Got %zu of at most %u characters", list.characters.size(), list.maxCharacters);
+            {
+                std::lock_guard lock(m_charactersMutex);
+                m_characters = std::move(list.characters);
+                m_maxCharacters = list.maxCharacters;
+            }
+            // The select popup reads the list through GetCharacterCount, GetCharacterId and GetCharacterName.
+            Red::CallVirtual(this, "OnCharacterList");
+        }
+        break;
+
+        case EMessageTypeClientbound::CharacterRequestFailed:
+        {
+            CharacterRequestFailed failed = {};
+            if (zpp::bits::failure(in(failed)))
+            {
+                SDK->logger->Error(PLUGIN, "Faulty packet: CharacterRequestFailed");
+                break;
+            }
+
+            SDK->logger->InfoF(PLUGIN, "Character request refused: %s", failed.message.c_str());
+            Red::CallVirtual(this, "OnCharacterRequestFailed", Red::CString(failed.message.c_str()));
+        }
+        break;
+
+        case EMessageTypeClientbound::CharacterSpawned:
+        {
+            CharacterSpawned spawned = {};
+            if (zpp::bits::failure(in(spawned)))
+            {
+                SDK->logger->Error(PLUGIN, "Faulty packet: CharacterSpawned");
+                break;
+            }
+
+            SDK->logger->InfoF(PLUGIN, "Playing %s (%s)%s", spawned.name.c_str(), spawned.characterId.c_str(),
+                               spawned.teleport ? ", moving to its saved place" : "");
+            const RED4ext::Vector4 position = { spawned.position.x, spawned.position.y, spawned.position.z, 1.0f };
+            Red::CallVirtual(this, "OnCharacterSpawned", Red::CString(spawned.name.c_str()), spawned.teleport,
+                             position, spawned.yaw, Red::CString(spawned.appearance.c_str()));
         }
         break;
 

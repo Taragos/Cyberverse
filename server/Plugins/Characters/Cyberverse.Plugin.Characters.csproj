@@ -1,0 +1,34 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    Characters in PostgreSQL: the select screen, creating and deleting characters, saved position and appearance
+    (CYB-00009). Install it with
+      dotnet publish server/Plugins/Characters -o <server>/plugins/Cyberverse.Plugin.Characters
+    The server image ships it. Without it a player spawns where their game loaded and nothing is saved.
+  -->
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <EnableDynamicLoading>true</EnableDynamicLoading>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- As in the accounts plugin: the server provides the API; tools/linux/add-migration.sh builds with it for dotnet ef. -->
+    <ProjectReference Include="..\..\Api\Cyberverse.Server.Api.csproj" Private="false" ExcludeAssets="runtime"
+                      Condition="'$(IncludeServerApi)' != 'true'" />
+    <ProjectReference Include="..\..\Api\Cyberverse.Server.Api.csproj" Condition="'$(IncludeServerApi)' == 'true'" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL" Version="10.0.3" />
+    <PackageReference Include="EFCore.NamingConventions" Version="10.0.1" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Relational" Version="10.0.14" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Design" Version="10.0.14" PrivateAssets="all" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Cyberverse.Plugin.Characters.Tests" />
+  </ItemGroup>
+
+</Project>

@@ -39,6 +39,12 @@ structs:
       - x: f32
       - y: f32
       - z: f32
+  CharacterInfo:
+    doc: One entry of the character select screen.
+    fields:
+      - characterId: { type: string, max: 36, doc: A GUID }
+      - name: { type: string, max: 160, doc: "\"Firstname Lastname\"" }
+      - lastPlayedUnix: { type: i64, doc: "Seconds since 1970 (UTC) of the last time it was played; 0 for never" }
 
 serverbound:
   InitAuth:
@@ -113,6 +119,36 @@ serverbound:
     fields:
       - sessionToken: { type: string, max: 128, doc: "The token from an earlier SessionIssued, or empty for none" }
       - deviceName: { type: string, max: 64, doc: "The PC's name, so players can tell their sessions apart" }
+  CharacterCreate:
+    id: 10
+    channel: 0
+    reliable: true
+    doc: Creates a character from the select screen. The server answers with CharacterList or CharacterRequestFailed.
+    fields:
+      - firstName: { type: string, max: 64, doc: "2 to 16 letters, ' and -" }
+      - lastName: { type: string, max: 64, doc: "2 to 16 letters, ' and -" }
+      - appearance: { type: string, max: 16384, doc: "The character creator's options as the client encodes them; may be empty" }
+  CharacterSelect:
+    id: 11
+    channel: 0
+    reliable: true
+    doc: Plays as this character. The server answers with CharacterSpawned or CharacterRequestFailed.
+    fields:
+      - characterId: { type: string, max: 36 }
+  CharacterDelete:
+    id: 12
+    channel: 0
+    reliable: true
+    doc: Deletes one of the player's characters (an admin can restore it). Answered with CharacterList or CharacterRequestFailed.
+    fields:
+      - characterId: { type: string, max: 36 }
+  CharacterAppearance:
+    id: 13
+    channel: 0
+    reliable: true
+    doc: The appearance of the character being played changed, e.g. at a mirror. Saved; no answer.
+    fields:
+      - appearance: { type: string, max: 16384 }
 
 clientbound:
   InitAuthResult:
@@ -174,3 +210,34 @@ clientbound:
     doc: A new session for this PC. The client saves the token and sends it in LoginWithSession next time.
     fields:
       - sessionToken: { type: string, max: 128 }
+  CharacterList:
+    id: 7
+    channel: 0
+    reliable: true
+    doc: >-
+      The player's characters, for the select screen. Sent after PlayerJoinWorld while no character is being played, and
+      after a create or delete.
+    fields:
+      - characters: { type: "CharacterInfo[]", max: 16 }
+      - maxCharacters: { type: u8, doc: How many characters the account may have }
+  CharacterRequestFailed:
+    id: 8
+    channel: 0
+    reliable: true
+    doc: A CharacterCreate, CharacterSelect or CharacterDelete was refused.
+    fields:
+      - message: { type: string, max: 1024, doc: "Why, written for the player" }
+  CharacterSpawned:
+    id: 9
+    channel: 0
+    reliable: true
+    doc: >-
+      The player now plays this character: also sent again after a repeated PlayerJoinWorld (e.g. a reload). The client
+      moves the player to position when teleport is set and applies the appearance.
+    fields:
+      - characterId: { type: string, max: 36 }
+      - name: { type: string, max: 160 }
+      - teleport: { type: bool, doc: "False for a new character: it stays where the game loaded" }
+      - position: Vector3
+      - yaw: f32
+      - appearance: { type: string, max: 16384 }

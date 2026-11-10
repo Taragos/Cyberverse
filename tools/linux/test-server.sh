@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
 # Runs the server tests and checks the generated protocol files are up to date, in the .NET SDK image plus clang (the
-# wire tests compile the client's protocol header). The host needs neither. The accounts plugin's tests start PostgreSQL
-# and Keycloak containers through the host's Podman socket (systemctl --user enable --now podman.socket); without it
-# they skip.
+# wire tests compile the client's protocol header). The host needs neither. The accounts and characters plugins' tests
+# start PostgreSQL (and Keycloak) containers through the host's Podman socket (systemctl --user enable --now
+# podman.socket); without it they skip.
 #
 #   tools/linux/test-server.sh                  run everything
 #   tools/linux/test-server.sh --generate       regenerate the protocol files from shared/protocol/protocol.yaml first
-#   tools/linux/test-server.sh -- <dotnet test arguments>, e.g. -- --filter PacketReaderTests (applies to both projects)
+#   tools/linux/test-server.sh -- <dotnet test arguments>, e.g. -- --filter PacketReaderTests (applies to every project)
 set -euo pipefail
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -41,4 +41,4 @@ fi
     -v cyberverse-nuget:/root/.nuget/packages \
     -w "$repo" \
     "$image" \
-    bash -c "dotnet run server/Tools/GenerateProtocol.cs ${generate:+-- $generate} && dotnet test server/Managed.Tests $* && dotnet test server/Plugins/Accounts.Tests $*"
+    bash -c "dotnet run server/Tools/GenerateProtocol.cs ${generate:+-- $generate} && dotnet test server/Managed.Tests $* && dotnet test server/Plugins/Accounts.Tests $* && dotnet test server/Plugins/Characters.Tests $*"

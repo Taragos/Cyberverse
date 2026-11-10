@@ -17,6 +17,7 @@
 #include <Protocol.h>
 #include <map>
 #include <mutex>
+#include <vector>
 #include <steam/isteamnetworkingsockets.h>
 #include <steam/steamnetworkingtypes.h>
 
@@ -41,6 +42,10 @@ private:
     // The server we connect to; the session token is saved per server.
     std::string m_serverHost;
     uint16_t m_serverPort = 0;
+    // The account's characters from the last CharacterList, for the select popup (CYB-00009).
+    std::mutex m_charactersMutex;
+    std::vector<CharacterInfo> m_characters;
+    int32_t m_maxCharacters = 0;
 
 private:
     void OnRegisterUpdates(RED4ext::UpdateRegistrar* aRegistrar) override;
@@ -82,6 +87,20 @@ public:
     /// Writes a line from redscript into this plugin's RED4ext log.
     void Log(const Red::CString& message);
 
+    /// The characters of the last CharacterList, last played first. Index getters instead of returning arrays: a
+    /// returned DynArray<CString> arrived in redscript with a wrong size (CYB-00009). Out of range gives "".
+    int32_t GetCharacterCount();
+    Red::CString GetCharacterId(int32_t index);
+    Red::CString GetCharacterName(int32_t index);
+    /// How many characters the account may have.
+    int32_t GetMaxCharacters();
+    /// Ask the server to create, play or delete a character. False when not connected.
+    bool CreateCharacter(const Red::CString& firstName, const Red::CString& lastName);
+    bool SelectCharacter(const Red::CString& characterId);
+    bool DeleteCharacter(const Red::CString& characterId);
+    /// Stores the look of the character being played (the encoded editor options). False when not connected.
+    bool SendCharacterAppearance(const Red::CString& appearance);
+
     /// Sends a packet from shared/protocol/Protocol.h; its channel and reliability come from the schema.
     template<typename T>
     bool EnqueueMessage(const T& packet);
@@ -100,6 +119,14 @@ RTTI_DEFINE_CLASS(NetworkGameSystem, {
     RTTI_METHOD(TakeLoginRejectedMessage);
     RTTI_METHOD(TakeLoginPrompt);
     RTTI_METHOD(Log);
+    RTTI_METHOD(GetCharacterCount);
+    RTTI_METHOD(GetCharacterId);
+    RTTI_METHOD(GetCharacterName);
+    RTTI_METHOD(GetMaxCharacters);
+    RTTI_METHOD(CreateCharacter);
+    RTTI_METHOD(SelectCharacter);
+    RTTI_METHOD(DeleteCharacter);
+    RTTI_METHOD(SendCharacterAppearance);
     RTTI_PROPERTY(FullyConnected);
     RTTI_PROPERTY(playerActionTracker);
     RTTI_ALIAS("Cyberverse.Network.Managers.NetworkGameSystem");

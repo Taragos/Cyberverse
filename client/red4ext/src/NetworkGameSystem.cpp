@@ -2,6 +2,7 @@
 
 #include "CommandLine.h"
 #include "SessionStore.h"
+#include "TypeDump.h"
 #include "Main.h"
 #include "Utils.h"
 
@@ -149,6 +150,10 @@ void NetworkGameSystem::OnNetworkUpdate(RED4ext::FrameInfo& frame_info, RED4ext:
         if (host.has_value() && port.has_value())
         {
             ConnectToServer(host.value(), port.value());
+        }
+        if (const auto types = ParseDumpTypesFromCommandLine(commandLine); types.has_value())
+        {
+            Cyberverse::TypeDump::DumpClasses(types.value());
         }
         m_hasTriedToConnect = true; // We lie here, to prevent parsing the cli every time.
     }

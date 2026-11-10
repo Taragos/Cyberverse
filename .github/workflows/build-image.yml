@@ -1,0 +1,44 @@
+name: Build image
+# Builds the Linux build environment (tools/linux/Containerfile: LLVM, the MSVC CRT and Windows SDK from xwin, vcpkg)
+# and pushes it to ghcr.io/<owner>/cyberverse-build:<hash of the Containerfile>, which the client-linux-cross job pulls
+# instead of building it every run.
+#
+# Keep the package PRIVATE: it contains Microsoft's CRT and SDK files, which may not be redistributed. Actions in this
+# repository can still pull it with their GITHUB_TOKEN.
+on:
+  push:
+    branches: [ "master" ]
+    paths: [ "tools/linux/Containerfile", ".github/workflows/build-image.yml" ]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  build-image:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: Name the image
+        id: image
+        run: |
+          owner="${GITHUB_REPOSITORY_OWNER,,}"
+          echo "name=ghcr.io/$owner/cyberverse-build" >> "$GITHUB_OUTPUT"
+          echo "tag=$(tools/linux/image-tag.sh)" >> "$GITHUB_OUTPUT"
+      - name: Log in to GHCR
+        run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+      - name: Check whether this Containerfile is already published
+        id: exists
+        run: |
+          if docker manifest inspect "${{ steps.image.outputs.name }}:${{ steps.image.outputs.tag }}" >/dev/null 2>&1; then
+            echo "Already published"
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Build and push
+        if: steps.exists.outputs.exists != 'true'
+        run: |
+          image="${{ steps.image.outputs.name }}"
+          docker build -t "$image:${{ steps.image.outputs.tag }}" -t "$image:latest" -f tools/linux/Containerfile tools/linux
+          docker push "$image:${{ steps.image.outputs.tag }}"
+          docker push "$image:latest"

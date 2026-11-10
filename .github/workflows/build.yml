@@ -69,8 +69,12 @@ jobs:
 
   client-linux-cross:
     # The same plugin as the client job, cross-compiled on Linux with clang-cl + xwin (tools/linux/build-client.sh), so
-    # a change that only builds with MSVC shows up here.
+    # a change that only builds with MSVC shows up here. The build environment comes from GHCR (build-image.yml); when
+    # the Containerfile changed and that image isn't published yet, container.sh builds it here instead.
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: read
 
     steps:
       - uses: actions/checkout@v5
@@ -83,11 +87,17 @@ jobs:
           path: ${{ github.workspace }}/.vcpkg-binary-cache
           key: vcpkg-cross-${{ hashFiles('client/red4ext/vcpkg.json', 'client/red4ext/cross/**', 'tools/linux/Containerfile') }}
           restore-keys: vcpkg-cross-
+      - name: Log in to GHCR
+        # Pull requests from forks get no package access; they fall back to building the image.
+        continue-on-error: true
+        run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
       - name: Cross-build the plugin
         env:
           CONTAINER: docker
           VCPKG_CACHE_DIR: ${{ github.workspace }}/.vcpkg-binary-cache
-        run: tools/linux/build-client.sh
+        run: |
+          export IMAGE="ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/cyberverse-build:$(tools/linux/image-tag.sh)"
+          tools/linux/build-client.sh
       - uses: actions/upload-artifact@v7
         with:
           name: RED4ext Plugin (Linux cross-build)

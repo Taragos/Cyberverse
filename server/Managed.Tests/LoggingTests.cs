@@ -34,14 +34,14 @@ public sealed class LoggingTests : IDisposable
     public void WritesTheRunFileAndLatestAtTheConfiguredLevel()
     {
         var terminal = new MemoryTarget("terminal") { Layout = "${logger}|${message}" };
-        var file = Logging.Configure(LogLevel.Info, _directory, new DateTime(2026, 11, 10, 7, 51, 9), terminal);
+        var file = Logging.Configure(LogLevel.Info, _directory, new DateTime(2026, 11, 10, 7, 51, 9), out _, terminal);
 
         LogManager.GetLogger("Test").Info("player joined");
         LogManager.GetLogger("Test").Debug("too detailed");
         LogManager.GetLogger(Logging.ConsoleLoggerName).Info("> plugins");
 
         Assert.Equal(Path.Combine(Path.GetFullPath(_directory), "server-2026-11-10_07-51-09.log"), file);
-        foreach (var path in new[] { file, Path.Combine(_directory, Logging.LatestFileName) })
+        foreach (var path in new[] { file!, Path.Combine(_directory, Logging.LatestFileName) })
         {
             var text = Read(path);
             Assert.Contains("|INFO|Test|player joined", text);
@@ -56,18 +56,35 @@ public sealed class LoggingTests : IDisposable
     [Fact]
     public void LatestStartsEmptyForEachRun()
     {
-        Logging.Configure(LogLevel.Info, _directory, new DateTime(2026, 11, 10, 7, 0, 0), new MemoryTarget());
+        Logging.Configure(LogLevel.Info, _directory, new DateTime(2026, 11, 10, 7, 0, 0), out _, new MemoryTarget());
         LogManager.GetLogger("Test").Info("first run");
         LogManager.Flush();
 
-        var second = Logging.Configure(LogLevel.Info, _directory, new DateTime(2026, 11, 10, 8, 0, 0), new MemoryTarget());
+        var second = Logging.Configure(LogLevel.Info, _directory, new DateTime(2026, 11, 10, 8, 0, 0), out _, new MemoryTarget());
         LogManager.GetLogger("Test").Info("second run");
 
         var latest = Read(Path.Combine(_directory, Logging.LatestFileName));
         Assert.DoesNotContain("first run", latest);
         Assert.Contains("second run", latest);
         Assert.Contains("first run", Read(Path.Combine(_directory, "server-2026-11-10_07-00-00.log")));
-        Assert.Contains("second run", Read(second));
+        Assert.Contains("second run", Read(second!));
+    }
+
+    [Fact]
+    public void FallsBackToTheConsoleWhenTheFolderCantBeCreated()
+    {
+        // A file where the folder should be: creating the folder fails on every OS, also as root.
+        Directory.CreateDirectory(_directory);
+        var blocked = Path.Combine(_directory, "logs");
+        File.WriteAllText(blocked, "");
+        var terminal = new MemoryTarget("terminal") { Layout = "${message}" };
+
+        var file = Logging.Configure(LogLevel.Info, blocked, DateTime.Now, out var error, terminal);
+        LogManager.GetLogger("Test").Info("still logged");
+
+        Assert.Null(file);
+        Assert.Contains(blocked, error);
+        Assert.Equal(["still logged"], terminal.Logs);
     }
 
     [Fact]

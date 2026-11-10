@@ -21,13 +21,35 @@ public static class Logging
 
     private const string RunFilePattern = "server-*.log";
 
-    /// <summary>Sets up NLog and returns the full path of this run's log file.</summary>
+    /// <summary>
+    /// Sets up NLog and returns the full path of this run's log file. When the folder can't be created, logs only to
+    /// the console and returns null with the reason in error, so a read-only folder never stops the server.
+    /// </summary>
     /// <param name="console">The terminal target; null for the colored console.</param>
-    public static string Configure(LogLevel level, string directory, DateTime startedAt, Target? console = null)
+    public static string? Configure(LogLevel level, string directory, DateTime startedAt, out string? error,
+        Target? console = null)
     {
-        Directory.CreateDirectory(directory);
-        DeleteOldRuns(directory, KeptRuns - 1);
+        console ??= new ColoredConsoleTarget("console")
+        {
+            EnableAnsiOutput = true, // Maybe this improves the Open Game Panel(?)
+            DetectOutputRedirected = true, // Disables colors when a file is detected
+        };
 
+        try
+        {
+            Directory.CreateDirectory(directory);
+            DeleteOldRuns(directory, KeptRuns - 1);
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+        {
+            var consoleOnly = new LoggingConfiguration();
+            consoleOnly.AddRule(level, LogLevel.Fatal, console);
+            LogManager.Configuration = consoleOnly;
+            error = $"Can't write logs to {Path.GetFullPath(directory)}: {e.Message.TrimEnd('.')}";
+            return null;
+        }
+
+        error = null;
         var runFile = Path.GetFullPath(Path.Combine(directory, $"server-{startedAt:yyyy-MM-dd_HH-mm-ss}.log"));
         var layout = "${longdate}|${level:uppercase=true}|${logger}|${message:withexception=true}";
         var files = new Target[]
@@ -48,11 +70,7 @@ public static class Logging
         config.LoggingRules.Add(consoleRule);
 
         var targets = files.ToList();
-        targets.Add(console ?? new ColoredConsoleTarget("console")
-        {
-            EnableAnsiOutput = true, // Maybe this improves the Open Game Panel(?)
-            DetectOutputRedirected = true, // Disables colors when a file is detected
-        });
+        targets.Add(console);
 
         foreach (var target in targets)
         {

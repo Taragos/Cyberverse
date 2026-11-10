@@ -27,10 +27,17 @@ public class Program
     {
         var config = ServerConfig.Load(ServerConfig.FileName, Environment.GetEnvironmentVariable);
         var logLevel = config.ResolveLogLevel();
-        var logFile = Logging.Configure(logLevel, config.LogDirectory, DateTime.Now);
+        var logFile = Logging.Configure(logLevel, config.LogDirectory, DateTime.Now, out var logError);
         var logger = LogManager.GetCurrentClassLogger();
         logger.Info($"Starting Cyberverse Server {BuildInfo.ModVersion}, protocol 0x{ProtocolInfo.Version:X8} (c) 2023-2025 MeFisto94");
-        logger.Info($"Logging at level {logLevel} to {logFile}");
+        if (logFile != null)
+        {
+            logger.Info($"Logging at level {logLevel} to {logFile}");
+        }
+        else
+        {
+            logger.Warn($"{logError}. Logging at level {logLevel} to the console only");
+        }
         logger.Info(config.AllowedGameVersions.Length == 0
             ? "Allowing any game version"
             : $"Allowing game versions {string.Join(", ", config.AllowedGameVersions)}");

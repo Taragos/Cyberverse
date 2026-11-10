@@ -61,9 +61,10 @@ built-in plugins (`server/Managed/PacketHandling/`); `server/Plugins/Example` is
   in its own `AssemblyLoadContext`. There's no hot reload. The `plugins` console command lists what loaded.
 - **Write one:** reference `server/Api/Cyberverse.Server.Api.csproj` with `Private="false" ExcludeAssets="runtime"` and
   `<EnableDynamicLoading>true</EnableDynamicLoading>`. In `OnLoad`, use the context: `Packets.Register<T>`,
-  `Events.Subscribe<PlayerJoinedWorld>` (also `PlayerAuthenticated`, `PlayerLeft`, or your own event types),
-  `Commands.Register`, `Services` (`IPlayerService`, `IConnections`, and services other plugins add in
-  `ConfigureServices`), `LoadConfig<T>()` for `config/<name>.json`, and `Logger`. What you register through the
+  `Events.Subscribe<PlayerJoinedWorld>` (also `PlayerAuthenticated`, `PlayerLeft`, `ConnectionClosed`, `ServerTick`,
+  or your own event types),
+  `Commands.Register`, `Services` (`IPlayerService`, `IConnections`, `IServerThread` to get back onto the server
+  thread after an `await`, and services other plugins add in `ConfigureServices`), `LoadConfig<T>()` for `config/<name>.json`, and `Logger`. What you register through the
   context is removed when the plugin fails or unloads.
 - **Order and failures:** `PluginInfo.DependsOn` names the plugins that load first. A plugin that throws, or whose
   dependency is missing or failed, is logged and skipped; the server keeps running. A handler or subscriber that
@@ -71,6 +72,27 @@ built-in plugins (`server/Managed/PacketHandling/`); `server/Plugins/Example` is
 - **Console:** type commands into the server's stdin: `help`, `plugins`, `stop`.
 - **Docker:** mount `/app/plugins` and `/app/config`; the config folder must be writable by the container user
   (`$APP_UID`, 1654), since a plugin writes its default config there on the first start.
+
+## Accounts and login
+Players log in with a Keycloak account; only users with the realm role `cyberverse-player` get in. The
+`server/Plugins/Accounts` plugin (shipped in the server image) keeps accounts, sessions and bans in PostgreSQL.
+
+1. The client connects and sends `InitAuth` (versions), then `LoginWithSession` with the token saved for this server
+   (`%LOCALAPPDATA%\Cyberverse\sessions\`), or none.
+2. A valid session gets in right away; the server re-checks the role with Keycloak (offline refresh token) on each join
+   and daily, and deletes the sessions of users who lost it.
+3. Otherwise the server starts a device login: the client gets `LoginRequired` and opens the link in the browser, the
+   player logs in (or registers) there, the server polls Keycloak, then sends `SessionIssued` and `InitAuthResult`.
+
+Every other packet from a connection that hasn't logged in is dropped. Run it with `server/deploy/compose.yaml`
+(PostgreSQL 18, Keycloak with the realm from `server/deploy/keycloak/`, the server); the file's header says how.
+Whitelist a player in Keycloak's admin console: realm `cyberverse`, Users, the user, Role mapping, assign
+`cyberverse-player`. Console commands: `sessions <account>`, `revoke-session <id>`, `revoke-sessions <account>`.
+Players should never enter a login code someone else gives them: whoever started that login gets their account.
+
+Without the accounts plugin (e.g. `tools/linux/run-server.sh`), the server runs in development mode: everyone gets in
+under their Windows user name and nothing is checked. When the plugin is installed but can't start (database down),
+every login is turned away. Database migrations: `tools/linux/add-migration.sh <Name>`.
 
 ## Server logs
 Each start writes everything the console shows, plus console commands and their replies, to its own file

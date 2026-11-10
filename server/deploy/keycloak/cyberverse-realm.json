@@ -1,0 +1,46 @@
+{
+  "realm": "cyberverse",
+  "displayName": "Cyberverse",
+  "enabled": true,
+  "registrationAllowed": true,
+  "registrationEmailAsUsername": false,
+  "loginWithEmailAllowed": true,
+  "duplicateEmailsAllowed": false,
+  "verifyEmail": false,
+  "resetPasswordAllowed": false,
+  "rememberMe": true,
+  "passwordPolicy": "length(12) and notUsername",
+  "oauth2DeviceCodeLifespan": 600,
+  "oauth2DevicePollingInterval": 5,
+  "offlineSessionIdleTimeout": 2592000,
+  "roles": {
+    "realm": [
+      {
+        "name": "cyberverse-player",
+        "description": "Whitelisted: may join the game server. An admin assigns it by hand."
+      }
+    ]
+  },
+  "clients": [
+    {
+      "clientId": "cyberverse-server",
+      "name": "Cyberverse game server",
+      "description": "The game server runs the device login for players (CYB-00008).",
+      "enabled": true,
+      "publicClient": false,
+      "clientAuthenticatorType": "client-secret",
+      "secret": "${CYBERVERSE_CLIENT_SECRET:change-me}",
+      "standardFlowEnabled": false,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": false,
+      "consentRequired": false,
+      "fullScopeAllowed": true,
+      "attributes": {
+        "oauth2.device.authorization.grant.enabled": "true"
+      },
+      "defaultClientScopes": ["basic", "profile", "roles", "email", "acr", "web-origins"],
+      "optionalClientScopes": ["offline_access"]
+    }
+  ]
+}

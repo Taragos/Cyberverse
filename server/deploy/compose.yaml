@@ -1,0 +1,81 @@
+# The game server with its database and Keycloak (CYB-00008). From this folder:
+#
+#   cp .env.example .env      # then change the passwords
+#   docker compose up -d      # or: podman compose up -d
+#
+# Keycloak's admin console: $KEYCLOAK_PUBLIC_URL/admin (user admin). Players register at
+# $KEYCLOAK_PUBLIC_URL/realms/cyberverse/account; an admin whitelists them by assigning the realm role cyberverse-player.
+# Keycloak runs in development mode (start-dev, plain http) here; for a public server put it behind an https reverse
+# proxy and switch to `start` (see https://www.keycloak.org/server/reverseproxy).
+name: cyberverse
+
+services:
+  postgres:
+    image: postgres:18-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: cyberverse
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-change-me}
+      POSTGRES_DB: cyberverse
+      KEYCLOAK_DB_PASSWORD: ${KEYCLOAK_DB_PASSWORD:-change-me}
+    volumes:
+      # PostgreSQL 18 images keep the data in a versioned folder below this one.
+      - postgres-data:/var/lib/postgresql
+      - ./postgres/init-keycloak.sh:/docker-entrypoint-initdb.d/init-keycloak.sh:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U cyberverse -d cyberverse"]
+      interval: 5s
+      retries: 20
+
+  keycloak:
+    image: quay.io/keycloak/keycloak:26.8.2
+    restart: unless-stopped
+    command: ["start-dev", "--import-realm"]
+    environment:
+      KC_DB: postgres
+      KC_DB_URL: jdbc:postgresql://postgres/keycloak
+      KC_DB_USERNAME: keycloak
+      KC_DB_PASSWORD: ${KEYCLOAK_DB_PASSWORD:-change-me}
+      KC_BOOTSTRAP_ADMIN_USERNAME: admin
+      KC_BOOTSTRAP_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD:-change-me}
+      # Links and token issuer use the public URL; the game server talks to keycloak:8080 inside the network.
+      KC_HOSTNAME: ${KEYCLOAK_PUBLIC_URL:-http://localhost:8080}
+      KC_HOSTNAME_BACKCHANNEL_DYNAMIC: "true"
+      KC_HEALTH_ENABLED: "true"
+      CYBERVERSE_CLIENT_SECRET: ${CYBERVERSE_CLIENT_SECRET:-change-me}
+    volumes:
+      - ./keycloak:/opt/keycloak/data/import:ro
+    ports:
+      - "8080:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  server:
+    # tools/linux/build-server.sh --image builds the same tag; `compose up --build` rebuilds it from here.
+    image: localhost/cyberverse-server
+    build:
+      context: ..
+      args:
+        CYBERVERSE_VERSION: ${CYBERVERSE_VERSION:-unknown}
+    restart: unless-stopped
+    environment:
+      # No Kerberos: the image lacks libgssapi and Npgsql would try it.
+      CYBERVERSE_ACCOUNTS_DATABASE: Host=postgres;Database=cyberverse;Username=cyberverse;Password=${POSTGRES_PASSWORD:-change-me};GSS Encryption Mode=Disable
+      CYBERVERSE_ACCOUNTS_CLIENT_SECRET: ${CYBERVERSE_CLIENT_SECRET:-change-me}
+      CYBERVERSE_ACCOUNTS_ISSUER: ${KEYCLOAK_PUBLIC_URL:-http://localhost:8080}/realms/cyberverse
+    volumes:
+      - server-config:/app/config
+      - server-logs:/app/logs
+    ports:
+      - "1337:1337/udp"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      keycloak:
+        condition: service_started
+
+volumes:
+  postgres-data:
+  server-config:
+  server-logs:

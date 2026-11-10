@@ -25,6 +25,12 @@ jobs:
       run: dotnet run server/Tools/GenerateProtocol.cs -- --check
     - name: Run the server tests
       run: dotnet test server/Managed.Tests
+    - name: Run the accounts plugin tests
+      # They start PostgreSQL and Keycloak containers. The Linux runner has Docker, so a missing engine is a failure
+      # there; the Windows runner has no Linux containers and skips them.
+      run: dotnet test server/Plugins/Accounts.Tests
+      env:
+        CYBERVERSE_REQUIRE_CONTAINERS: ${{ runner.os == 'Linux' && '1' || '0' }}
 
   docker-server:
     runs-on: ubuntu-latest

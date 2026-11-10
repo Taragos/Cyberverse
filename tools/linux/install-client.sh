@@ -60,3 +60,15 @@ grep -qx '+Cyberverse' "$modlist" || printf '+Cyberverse\n' >> "$modlist"
 echo "Installed into $mod:"
 find "$mod" -type f ! -name meta.ini | sed "s|$mod/|  |"
 echo "Enabled in profile '$profile'. First install: restart (or refresh) the mod manager so it indexes the new mod, then deploy."
+
+# Hardlinked deploys only update files the mod manager already knows; new files need a refresh and a deploy, or the
+# game runs scripts that import missing ones and redscript fails to compile.
+game="${CYBERVERSE_GAME:-/mnt/nvme/SteamLibrary/steamapps/common/Cyberpunk 2077}"
+if [[ -d "$game" ]]; then
+    missing="$(cd "$mod" && find . -type f ! -name meta.ini | while read -r f; do [[ -e "$game/$f" ]] || echo "  ${f#./}"; done)"
+    if [[ -n "$missing" ]]; then
+        echo
+        echo "Not in the game folder yet (refresh the mod manager, then deploy):"
+        echo "$missing"
+    fi
+fi

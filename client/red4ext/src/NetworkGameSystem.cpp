@@ -239,7 +239,8 @@ Red::CString NetworkGameSystem::TakeLoginPrompt()
 
 void NetworkGameSystem::Log(const Red::CString& message)
 {
-    SDK->logger->InfoF(PLUGIN, "[script] %s", message.c_str());
+    // The thread id tells the UI thread from job workers (CYB-00023).
+    SDK->logger->InfoF(PLUGIN, "[script t%lu] %s", GetCurrentThreadId(), message.c_str());
 }
 
 Red::CString NetworkGameSystem::TakeLoginRejectedMessage()

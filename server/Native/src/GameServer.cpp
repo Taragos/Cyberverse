@@ -153,6 +153,13 @@ void GameServer::PollConnectionStateChanges() const
     }
 }
 
+bool GameServer::CloseConnection(const uint32_t connectionId, const int32_t reason, const char* debug) const
+{
+    // Linger: the connection stays open in the background until the reliable messages sent before (e.g. the login
+    // rejection) have arrived. No state change callback follows a close from our side.
+    return m_pInterface->CloseConnection(connectionId, reason, debug, true);
+}
+
 bool GameServer::SendRaw(const uint32_t connectionId, const uint8_t* data, const uint32_t size,
                          const int32_t sendFlags) const
 {

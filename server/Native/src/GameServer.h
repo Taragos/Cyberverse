@@ -37,6 +37,7 @@ public:
     [[nodiscard]] Message PollRecvQueue();
     static void ReleaseMessage(void* handle);
     bool SendRaw(uint32_t connectionId, const uint8_t* data, uint32_t size, int32_t sendFlags) const;
+    bool CloseConnection(uint32_t connectionId, int32_t reason, const char* debug) const;
     void SetConnectionStatusChangedCallback(void (*cb)(uint32_t, uint32_t));
     /* DLL API stop */
 };

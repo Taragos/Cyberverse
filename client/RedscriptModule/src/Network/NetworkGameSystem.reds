@@ -6,6 +6,8 @@ public native class NetworkGameSystem extends IGameSystem {
     native let FullyConnected: Bool;
     native let playerActionTracker: ref<PlayerActionTracker>;
     public native func EnqueueLoadLastCheckpoint(handler: wref<inkISystemRequestsHandler>) -> Void;
+    public native func TakeLoginRejectedMessage() -> String;
+    public native func Log(message: String) -> Void;
     
     public func SpawnTransientEntity(entityName: TweakDBID, worldPosition: Vector4, worldOrientation: Quaternion) -> EntityID {
         let npcSpec = new DynamicEntitySpec();

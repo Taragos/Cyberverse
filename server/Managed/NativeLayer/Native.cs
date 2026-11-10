@@ -60,6 +60,11 @@ public static class Native
     public static extern unsafe bool server_send_message(IntPtr server, uint connectionId, byte* data, uint size,
         int sendFlags);
 
+    [DllImport(LibraryName)]
+    [return: MarshalAs(UnmanagedType.U1)]
+    public static extern bool server_close_connection(IntPtr server, uint connectionId, int reason,
+        [MarshalAs(UnmanagedType.LPUTF8Str)] string debug);
+
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
     public delegate void ConnectionStateChangedCallback(ESteamNetworkingConnectionState state, uint connectionId);
     

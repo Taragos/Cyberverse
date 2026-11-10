@@ -9,7 +9,7 @@ namespace Cyberverse.Server.Protocol;
 public static class ProtocolInfo
 {
     /// <summary>A hash of protocol.yaml. The client sends it at login; the server rejects a different one.</summary>
-    public const uint Version = 0x74246339;
+    public const uint Version = 0x74BF4AE9;
 }
 
 public enum EMessageTypeServerbound : ushort
@@ -33,7 +33,7 @@ public enum EMessageTypeClientbound : ushort
     EquipItemEntity = 4,
 }
 
-/// <summary>ValidationFailed covers everything from a wrong password to being banned.</summary>
+/// <summary>ValidationFailed covers everything from a wrong password to being banned. Part of the frozen InitAuthResult.</summary>
 public enum EAuthResult : byte
 {
     Ok,
@@ -93,7 +93,7 @@ public partial struct Vector3 : IWireType<Vector3>
     }
 }
 
-/// <summary>The first packet of a connection. protocolVersion comes first so a server can read it whatever follows.</summary>
+/// <summary>The first packet of a connection. Frozen, see the top of this file.</summary>
 public partial struct InitAuth : IServerBoundPacket<InitAuth>
 {
     public static ushort MessageId => 0;
@@ -104,11 +104,17 @@ public partial struct InitAuth : IServerBoundPacket<InitAuth>
     public uint ProtocolVersion;
     /// <summary>UTF-8. At most 255 bytes.</summary>
     public string Username;
+    /// <summary>The client's build, from git describe, e.g. v0.1.0-12-gaba70a7. At most 64 bytes.</summary>
+    public string ModVersion;
+    /// <summary>The game's product version as RED4ext reports it, e.g. 2.31.0. At most 32 bytes.</summary>
+    public string GameVersion;
 
     public readonly void Write(PacketWriter writer)
     {
         writer.WriteU32(ProtocolVersion);
         writer.WriteString(Username, 255);
+        writer.WriteString(ModVersion, 64);
+        writer.WriteString(GameVersion, 32);
     }
 
     public static bool TryRead(ref PacketReader reader, out InitAuth value)
@@ -116,6 +122,8 @@ public partial struct InitAuth : IServerBoundPacket<InitAuth>
         value = default;
         if (!reader.TryReadU32(out value.ProtocolVersion)) return false;
         if (!reader.TryReadString(255, out value.Username)) return false;
+        if (!reader.TryReadString(64, out value.ModVersion)) return false;
+        if (!reader.TryReadString(32, out value.GameVersion)) return false;
         return true;
     }
 }
@@ -299,6 +307,7 @@ public partial struct PlayerShoot : IServerBoundPacket<PlayerShoot>
     }
 }
 
+/// <summary>The answer to InitAuth. Frozen, see the top of this file. After any result but Ok the server closes the connection.</summary>
 public partial struct InitAuthResult : IClientBoundPacket<InitAuthResult>
 {
     public static ushort MessageId => 0;
@@ -308,11 +317,17 @@ public partial struct InitAuthResult : IClientBoundPacket<InitAuthResult>
 
     public EAuthResult AuthResult;
     public uint ProtocolVersion;
+    /// <summary>The server's build, from git describe. At most 64 bytes.</summary>
+    public string ModVersion;
+    /// <summary>Why the login failed, written for the player. Empty when authResult is Ok. At most 1024 bytes.</summary>
+    public string Message;
 
     public readonly void Write(PacketWriter writer)
     {
         EnumCodec.Write(writer, AuthResult);
         writer.WriteU32(ProtocolVersion);
+        writer.WriteString(ModVersion, 64);
+        writer.WriteString(Message, 1024);
     }
 
     public static bool TryRead(ref PacketReader reader, out InitAuthResult value)
@@ -320,6 +335,8 @@ public partial struct InitAuthResult : IClientBoundPacket<InitAuthResult>
         value = default;
         if (!EnumCodec.TryRead(ref reader, out value.AuthResult)) return false;
         if (!reader.TryReadU32(out value.ProtocolVersion)) return false;
+        if (!reader.TryReadString(64, out value.ModVersion)) return false;
+        if (!reader.TryReadString(1024, out value.Message)) return false;
         return true;
     }
 }

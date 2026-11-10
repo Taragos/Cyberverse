@@ -108,7 +108,8 @@ record EnumDef(string Name, string Type, List<string> Values, string? Doc);
 
 record StructDef(string Name, List<Field> Fields, string? Doc);
 
-record PacketDef(string Direction, string Name, ushort Id, byte Channel, bool Reliable, List<Field> Fields, string? Doc)
+record PacketDef(string Direction, string Name, ushort Id, byte Channel, bool Reliable, List<Field> Fields, string? Doc,
+    string? Frozen)
 {
     public string EnumName => Direction == "serverbound" ? "EMessageTypeServerbound" : "EMessageTypeClientbound";
     public string Interface => Direction == "serverbound" ? "IServerBoundPacket" : "IClientBoundPacket";
@@ -186,6 +187,7 @@ class Schema
         }
 
         schema.CheckStructsAreNotRecursive();
+        schema.CheckFrozenPackets();
         schema.Version = schema.ComputeVersion();
         return schema;
     }
@@ -226,7 +228,7 @@ class Schema
 
     private PacketDef ParsePacket(string direction, string name, YamlMappingNode body)
     {
-        CheckKeys(body, "id", "channel", "reliable", "fields", "doc");
+        CheckKeys(body, "id", "channel", "reliable", "fields", "doc", "frozen");
         var id = ParseNumber(body, "id", ushort.MaxValue);
         var channel = ParseNumber(body, "channel", byte.MaxValue);
         var reliable = RequiredScalar(body, "reliable") switch
@@ -235,7 +237,8 @@ class Schema
             "false" => false,
             _ => throw Error(body, $"{name}: reliable must be true or false"),
         };
-        return new PacketDef(direction, name, (ushort)id, (byte)channel, reliable, ParseFields(body), OptionalScalar(body, "doc"));
+        return new PacketDef(direction, name, (ushort)id, (byte)channel, reliable, ParseFields(body), OptionalScalar(body, "doc"),
+            OptionalScalar(body, "frozen"));
     }
 
     private List<Field> ParseFields(YamlMappingNode body)
@@ -318,6 +321,59 @@ class Schema
             {
                 throw new SchemaException($"field '{field.Name}': arrays of empty structs aren't supported");
             }
+        }
+    }
+
+    /// <summary>
+    /// The login packets (id 0 in each direction) must keep their layout forever, so that a client of any version can
+    /// still read the server's answer and show the player why it was turned away. Each carries `frozen: <fingerprint>`,
+    /// a hash of its wire layout with the enums and structs it uses expanded; changing the layout changes the
+    /// fingerprint and fails the build.
+    /// </summary>
+    private void CheckFrozenPackets()
+    {
+        foreach (var p in Packets)
+        {
+            var fingerprint = Fingerprint(p);
+            if (p.Frozen == null)
+            {
+                if (p.Id == 0)
+                {
+                    throw new SchemaException($"{p.Direction} {p.Name} has id 0, the login packet, which must be frozen. " +
+                                              $"Add `frozen: {fingerprint}`.");
+                }
+                continue;
+            }
+
+            if (p.Frozen != fingerprint)
+            {
+                throw new SchemaException(
+                    $"{p.Direction} {p.Name} is frozen, but its wire layout changed (fingerprint {fingerprint}, frozen as " +
+                    $"{p.Frozen}). Clients built before the change can no longer log in or read why they were rejected. " +
+                    "Put new login data into a later packet instead. Appending an enum value is safe for old clients; " +
+                    $"only then, or if you really mean to cut off every older client, set `frozen: {fingerprint}`.");
+            }
+        }
+    }
+
+    /// <summary>8 hex digits of a hash over the packet's wire layout: id, channel and every field, types expanded.</summary>
+    public string Fingerprint(PacketDef p)
+    {
+        var text = new StringBuilder($"{p.Direction} id={p.Id} channel={p.Channel} reliable={p.Reliable}");
+        foreach (var f in p.Fields) text.Append($";{f.Name}:{Expand(f.Type)}" + (f.Max is { } m ? $"<={m}" : ""));
+        var hash = SHA256.HashData(Encoding.UTF8.GetBytes(text.ToString()));
+        return Convert.ToHexString(hash, 0, 4).ToLowerInvariant();
+
+        string Expand(FieldType type)
+        {
+            var element = type.Kind switch
+            {
+                Kind.Enum when Enums.First(e => e.Name == type.Name) is var e => $"enum:{e.Type}({string.Join(',', e.Values)})",
+                Kind.Struct => "{" + string.Join(';', Structs.First(s => s.Name == type.Name).Fields
+                    .Select(f => $"{f.Name}:{Expand(f.Type)}" + (f.Max is { } m ? $"<={m}" : ""))) + "}",
+                _ => type.Name,
+            };
+            return type.IsArray ? element + "[]" : element;
         }
     }
 

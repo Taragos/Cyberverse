@@ -18,12 +18,17 @@
 # Packets: id is the message id within its direction, channel the GameNetworkingSockets lane, reliable whether it is
 # resent until it arrives. The protocol version both sides compare at login is a hash of everything in this file except
 # comments and doc texts, so any other change makes old clients and servers incompatible.
+#
+# The login packets (id 0 in each direction: InitAuth and InitAuthResult) are frozen: their layout never changes, so a
+# client of any version can still log in far enough to read why the server turned it away. `frozen` holds a fingerprint
+# of the layout and the generator fails when it no longer matches. Put new login data into a later packet. Appending a
+# value to EAuthResult is safe (old clients show the message for any result but Ok) and only needs a new fingerprint.
 
 enums:
   EAuthResult:
     type: u8
     values: [Ok, VersionMismatch, ValidationFailed]
-    doc: ValidationFailed covers everything from a wrong password to being banned.
+    doc: ValidationFailed covers everything from a wrong password to being banned. Part of the frozen InitAuthResult.
   EPlayerAction:
     type: u8
     values: [Jump, RangedAttack]
@@ -40,10 +45,13 @@ serverbound:
     id: 0
     channel: 0
     reliable: true
-    doc: The first packet of a connection. protocolVersion comes first so a server can read it whatever follows.
+    doc: The first packet of a connection. Frozen, see the top of this file.
+    frozen: 0efbf337
     fields:
       - protocolVersion: u32
       - username: { type: string, max: 255, doc: UTF-8 }
+      - modVersion: { type: string, max: 64, doc: "The client's build, from git describe, e.g. v0.1.0-12-gaba70a7" }
+      - gameVersion: { type: string, max: 32, doc: "The game's product version as RED4ext reports it, e.g. 2.31.0" }
   PlayerJoinWorld:
     id: 1
     channel: 0
@@ -101,9 +109,13 @@ clientbound:
     id: 0
     channel: 0
     reliable: true
+    doc: The answer to InitAuth. Frozen, see the top of this file. After any result but Ok the server closes the connection.
+    frozen: a29bee02
     fields:
       - authResult: EAuthResult
       - protocolVersion: u32
+      - modVersion: { type: string, max: 64, doc: "The server's build, from git describe" }
+      - message: { type: string, max: 1024, doc: "Why the login failed, written for the player. Empty when authResult is Ok" }
   SpawnEntity:
     id: 1
     channel: 1

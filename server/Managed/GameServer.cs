@@ -47,27 +47,40 @@ public class GameServer: NativeGameServer
         // TODO: More handling of player connection states. Cleanup routines, pre-auth states, ...
         if (state is ESteamNetworkingConnectionState.ClosedByPeer or ESteamNetworkingConnectionState.ProblemDetectedLocally)
         {
-            if (!PlayerService.ConnectedPlayers.TryGetValue(connectionId, out var player))
-            {
-                // someone connected but never signed in
-                return;
-            }
-            
-            Logger.Info($"Player {player.Name} disconnected");
-            var playerEntities = EntityService.SpawnedEntities
-                .Select(x => x.Value)
-                .Where(x => x.NetworkIdOwner == connectionId)
-                .ToList();
-                
-            foreach (var playerEntity in playerEntities)
-            {
-                EntityTracker.StopTrackingOf(playerEntity);
-                EntityService.RemoveEntity(playerEntity.NetworkedEntityId);
-                EntityService.SpawnedEntities.Remove(playerEntity.NetworkedEntityId);
-            }
-
-            PlayerService.ConnectedPlayers.Remove(connectionId);
+            RemovePlayer(connectionId);
         }
+    }
+
+    /// <summary>Closes a connection from the server's side and cleans up after its player, if it had signed in.</summary>
+    public override bool CloseConnection(uint connectionId, int reason, string debug)
+    {
+        var closed = base.CloseConnection(connectionId, reason, debug);
+        RemovePlayer(connectionId);
+        return closed;
+    }
+
+    private void RemovePlayer(uint connectionId)
+    {
+        if (!PlayerService.ConnectedPlayers.TryGetValue(connectionId, out var player))
+        {
+            // someone connected but never signed in
+            return;
+        }
+
+        Logger.Info($"Player {player.Name} disconnected");
+        var playerEntities = EntityService.SpawnedEntities
+            .Select(x => x.Value)
+            .Where(x => x.NetworkIdOwner == connectionId)
+            .ToList();
+
+        foreach (var playerEntity in playerEntities)
+        {
+            EntityTracker.StopTrackingOf(playerEntity);
+            EntityService.RemoveEntity(playerEntity.NetworkedEntityId);
+            EntityService.SpawnedEntities.Remove(playerEntity.NetworkedEntityId);
+        }
+
+        PlayerService.ConnectedPlayers.Remove(connectionId);
     }
 
     public override void Update(float deltaTime)

@@ -23,7 +23,10 @@ WORKDIR /source
 
 ADD Managed /source
 RUN dotnet restore
-RUN dotnet publish --no-restore -o /app
+# The build context has no .git, so the mod version comes in as an argument:
+#   docker build --build-arg CYBERVERSE_VERSION=$(git describe --tags --always --dirty --match "v[0-9]*") server
+ARG CYBERVERSE_VERSION=unknown
+RUN dotnet publish --no-restore -o /app -p:CyberverseVersion=${CYBERVERSE_VERSION}
 
 # Ubuntu 24.04 (noble) to match the build stage; the default Debian 12 image has glibc 2.36, but the natives need 2.38+.
 FROM mcr.microsoft.com/dotnet/runtime:10.0-noble

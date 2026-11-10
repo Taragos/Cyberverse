@@ -9,7 +9,7 @@
 #include <vector>
 
 /// A hash of protocol.yaml. The client sends it at login; the server rejects a different one.
-constexpr uint32_t PROTOCOL_VERSION_CURRENT = 0x74246339;
+constexpr uint32_t PROTOCOL_VERSION_CURRENT = 0x74BF4AE9;
 
 /// The 4 bytes in front of every packet. zpp_bits writes the struct, then the packet's fields.
 struct MessageFrame
@@ -40,7 +40,7 @@ enum class EMessageTypeClientbound : uint16_t
     EquipItemEntity = 4,
 };
 
-/// ValidationFailed covers everything from a wrong password to being banned.
+/// ValidationFailed covers everything from a wrong password to being banned. Part of the frozen InitAuthResult.
 enum class EAuthResult : uint8_t
 {
     Ok,
@@ -63,12 +63,16 @@ struct Vector3
 
 // serverbound packets
 
-/// The first packet of a connection. protocolVersion comes first so a server can read it whatever follows.
+/// The first packet of a connection. Frozen, see the top of this file.
 struct InitAuth
 {
     uint32_t protocolVersion{};
     /// UTF-8. At most 255 bytes.
     std::string username{};
+    /// The client's build, from git describe, e.g. v0.1.0-12-gaba70a7. At most 64 bytes.
+    std::string modVersion{};
+    /// The game's product version as RED4ext reports it, e.g. 2.31.0. At most 32 bytes.
+    std::string gameVersion{};
 
     static constexpr EMessageTypeServerbound MessageType = EMessageTypeServerbound::InitAuth;
     static constexpr uint8_t Channel = 0;
@@ -197,10 +201,15 @@ struct PlayerShoot
 
 // clientbound packets
 
+/// The answer to InitAuth. Frozen, see the top of this file. After any result but Ok the server closes the connection.
 struct InitAuthResult
 {
     EAuthResult authResult{};
     uint32_t protocolVersion{};
+    /// The server's build, from git describe. At most 64 bytes.
+    std::string modVersion{};
+    /// Why the login failed, written for the player. Empty when authResult is Ok. At most 1024 bytes.
+    std::string message{};
 
     static constexpr EMessageTypeClientbound MessageType = EMessageTypeClientbound::InitAuthResult;
     static constexpr uint8_t Channel = 0;

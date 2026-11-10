@@ -83,6 +83,8 @@ public class PacketReaderTests
         writer.Reset();
         writer.WriteU32(1);
         writer.WriteString(new string('a', 255), uint.MaxValue);
+        writer.WriteString("v0.1.0", uint.MaxValue);
+        writer.WriteString("2.31.0", uint.MaxValue);
         Assert.True(Packet.TryRead<InitAuth>(writer.ToArray(), out var read));
         Assert.Equal(255, read.Username.Length);
     }

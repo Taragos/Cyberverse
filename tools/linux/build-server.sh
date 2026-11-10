@@ -13,7 +13,8 @@ engine="${CONTAINER:-podman}"
 
 if [[ "${1:-}" == "--image" ]]; then
     # Same steps as the docker-server CI job.
-    "$engine" build -t cyberverse-server -f "$repo/server/Dockerfile" "$repo/server"
+    version="$(git -C "$repo" describe --tags --always --dirty --match 'v[0-9]*' 2>/dev/null || echo unknown)"
+    "$engine" build --build-arg "CYBERVERSE_VERSION=$version" -t cyberverse-server -f "$repo/server/Dockerfile" "$repo/server"
     exit 0
 fi
 

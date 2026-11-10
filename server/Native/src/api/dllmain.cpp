@@ -76,6 +76,15 @@ extern "C" EXPORT bool server_send_message(const GameServer *server, const uint3
     return server->SendRaw(connectionId, data, size, sendFlags);
 }
 
+/// Closes a connection after the reliable messages already sent to it have arrived. reason is a GameNetworkingSockets
+/// end reason, from k_ESteamNetConnectionEnd_App_Min (1000) for application reasons; debug is a short text for logs.
+/// No connection state callback follows, so the caller cleans up after the connection itself.
+extern "C" EXPORT bool server_close_connection(const GameServer *server, const uint32_t connectionId, const int32_t reason,
+                                              const char* debug)
+{
+    return server->CloseConnection(connectionId, reason, debug);
+}
+
 extern "C" EXPORT void server_set_connection_state_changed_cb(GameServer *server, void (*cb)(uint32_t, uint32_t))
 {
     server->SetConnectionStatusChangedCallback(cb);

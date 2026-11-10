@@ -14,6 +14,7 @@
 #include <steam/isteamnetworkingutils.h> // Required, see https://github.com/ValveSoftware/GameNetworkingSockets/issues/171^
 #include <steam/steamnetworkingsockets.h>
 
+#include <CyberverseVersion.h>
 #include <Protocol.h>
 
 #include <zpp_bits.h>
@@ -144,12 +145,32 @@ void NetworkGameSystem::ConnectionStatusChangedCallback(SteamNetConnectionStatus
         InitAuth auth_packet = {};
         auth_packet.protocolVersion = PROTOCOL_VERSION_CURRENT;
         auth_packet.username = username;
+        auth_packet.modVersion = CYBERVERSE_VERSION;
+        // The product version, e.g. 2.31.0; hotfixes of one patch share it.
+        const auto* game = SDK->runtime;
+        auth_packet.gameVersion = std::to_string(game->major) + "." + std::to_string(game->minor) + "." +
+                                  std::to_string(game->patch);
+        SDK->logger->InfoF(PLUGIN, "Cyberverse %s, game %s, protocol 0x%08X", CYBERVERSE_VERSION,
+                           auth_packet.gameVersion.c_str(), PROTOCOL_VERSION_CURRENT);
 
         // TODO: Maybe we could manage this singleton access better? But then, the Game's GameSystem Container is the owner of "this"
         Red::GetGameSystem<NetworkGameSystem>()->EnqueueMessage(auth_packet);
     } else {
         Red::GetGameSystem<NetworkGameSystem>()->FullyConnected = false;
     }
+}
+
+void NetworkGameSystem::Log(const Red::CString& message)
+{
+    SDK->logger->InfoF(PLUGIN, "[script] %s", message.c_str());
+}
+
+Red::CString NetworkGameSystem::TakeLoginRejectedMessage()
+{
+    std::lock_guard lock(m_loginRejectedMutex);
+    Red::CString message(m_loginRejectedMessage.c_str());
+    m_loginRejectedMessage.clear();
+    return message;
 }
 
 template<typename T>
@@ -277,6 +298,24 @@ void NetworkGameSystem::PollIncomingMessages()
                 continue;
             }
 
+            if (auth_result_packet.authResult != EAuthResult::Ok)
+            {
+                // Any other result, including ones added after this build, means the server closes the connection.
+                // Its message says why, in words for the player.
+                SDK->logger->WarnF(PLUGIN, "Login rejected (%d, server %s, protocol 0x%08X; ours 0x%08X): %s",
+                                   static_cast<int>(auth_result_packet.authResult),
+                                   auth_result_packet.modVersion.c_str(), auth_result_packet.protocolVersion,
+                                   PROTOCOL_VERSION_CURRENT, auth_result_packet.message.c_str());
+                const auto& message = auth_result_packet.message.empty()
+                                          ? std::string("The server turned the login away without saying why.")
+                                          : auth_result_packet.message;
+                {
+                    std::lock_guard lock(m_loginRejectedMutex);
+                    m_loginRejectedMessage = message;
+                }
+                m_hasEnqueuedLoadLastCheckpoint = false;
+            }
+
             switch (auth_result_packet.authResult)
             {
             case EAuthResult::Ok:
@@ -289,15 +328,8 @@ void NetworkGameSystem::PollIncomingMessages()
                 }
                 // TODO: Follow-Up action
                 break;
-            case EAuthResult::ValidationFailed:
-                SDK->logger->Warn(PLUGIN, "Login: Validation failed");
-                break;
-            case EAuthResult::VersionMismatch:
-                SDK->logger->WarnF(PLUGIN, "Login: Version mismatch (client protocol 0x%08X, server 0x%08X)",
-                                   PROTOCOL_VERSION_CURRENT, auth_result_packet.protocolVersion);
-                break;
             default:
-                SDK->logger->ErrorF(PLUGIN, "Unknown auth result: %d", static_cast<int>(auth_result_packet.authResult));
+                break; // logged above
             }
         }
         break;
@@ -462,6 +494,12 @@ bool NetworkGameSystem::OnGameRestored()
 
 void NetworkGameSystem::TrackPlayerPosition(float deltaTime)
 {
+    // Nothing to send to before the login is accepted, or after the server closed the connection.
+    if (!FullyConnected)
+    {
+        return;
+    }
+
     m_TimeSinceLastPlayerPositionSync += deltaTime;
     if (m_TimeSinceLastPlayerPositionSync < 0.1f /* update rate*/)
     {

@@ -33,3 +33,7 @@ if(CMAKE_HOST_UNIX)
     COMMAND ${CMAKE_COMMAND} -E copy_if_different $<TARGET_RUNTIME_DLLS:${CMAKE_PROJECT_NAME}> $<TARGET_FILE_DIR:${CMAKE_PROJECT_NAME}>
     COMMAND_EXPAND_LISTS)
 endif()
+
+# CYBERVERSE_VERSION (the mod version sent at login), from git describe.
+include("${CMAKE_CURRENT_SOURCE_DIR}/../../../shared/version/CyberverseVersion.cmake")
+cyberverse_version_header(${CMAKE_PROJECT_NAME})

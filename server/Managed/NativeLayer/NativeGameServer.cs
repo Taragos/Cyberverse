@@ -57,6 +57,15 @@ public class NativeGameServer
         }
     }
 
+    /// <summary>
+    /// Closes the connection once the reliable packets already sent to it have arrived. reason is an application end
+    /// reason (from 1000 up). No <see cref="OnConnectionStateChange"/> follows.
+    /// </summary>
+    public virtual bool CloseConnection(uint connectionId, int reason, string debug)
+    {
+        return Native.server_close_connection(_nativePtr, connectionId, reason, debug);
+    }
+
     protected virtual void OnConnectionStateChange(ESteamNetworkingConnectionState state, uint connectionId)
     {
     }

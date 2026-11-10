@@ -15,4 +15,29 @@
     <PackageReference Include="System.IO.Hashing" Version="8.0.0" />
   </ItemGroup>
 
+  <!--
+    The mod version the server reports at login (BuildInfo.ModVersion): `git describe` of the checkout, or the
+    CyberverseVersion property when there is no .git (the Docker build passes it as a build argument). The client
+    stamps the same string with shared/version/CyberverseVersion.cmake.
+  -->
+  <Target Name="GenerateBuildInfo" BeforeTargets="CoreCompile">
+    <Exec Condition="'$(CyberverseVersion)' == ''" Command="git describe --tags --always --dirty --match &quot;v[0-9]*&quot;"
+          ConsoleToMSBuild="true" IgnoreExitCode="true" StandardOutputImportance="low" StandardErrorImportance="low"
+          WorkingDirectory="$(MSBuildProjectDirectory)">
+      <Output TaskParameter="ConsoleOutput" PropertyName="_GitDescribe" />
+      <Output TaskParameter="ExitCode" PropertyName="_GitDescribeExitCode" />
+    </Exec>
+    <PropertyGroup>
+      <CyberverseVersion Condition="'$(CyberverseVersion)' == '' And '$(_GitDescribeExitCode)' == '0'">$(_GitDescribe)</CyberverseVersion>
+      <CyberverseVersion Condition="'$(CyberverseVersion)' == ''">unknown</CyberverseVersion>
+      <_BuildInfoFile>$(IntermediateOutputPath)BuildInfo.g.cs</_BuildInfoFile>
+    </PropertyGroup>
+    <WriteLinesToFile File="$(_BuildInfoFile)" Overwrite="true" WriteOnlyWhenDifferent="true"
+                      Lines="// &lt;auto-generated/&gt;;namespace Cyberverse.Server%3B;public static class BuildInfo { public const string ModVersion = &quot;$(CyberverseVersion)&quot;%3B }" />
+    <ItemGroup>
+      <Compile Include="$(_BuildInfoFile)" />
+      <FileWrites Include="$(_BuildInfoFile)" />
+    </ItemGroup>
+  </Target>
+
 </Project>

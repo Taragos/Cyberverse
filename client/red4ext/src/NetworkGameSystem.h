@@ -16,6 +16,7 @@
 #include <RedLib.hpp>
 #include <Protocol.h>
 #include <map>
+#include <mutex>
 #include <steam/isteamnetworkingsockets.h>
 #include <steam/steamnetworkingtypes.h>
 
@@ -32,6 +33,9 @@ private:
     std::map<RED4ext::ent::EntityID, InterpolationData> m_interpolationData;
     std::map<RED4ext::ent::EntityID, RED4ext::Handle<RED4ext::AICommand>> m_LastTeleportCommand;
     float m_TimeSinceLastPlayerPositionSync;
+    // Written on a network worker thread, taken by the main menu on the UI thread.
+    std::mutex m_loginRejectedMutex;
+    std::string m_loginRejectedMessage;
 
 private:
     void OnRegisterUpdates(RED4ext::UpdateRegistrar* aRegistrar) override;
@@ -60,6 +64,13 @@ public:
         m_hasEnqueuedLoadLastCheckpoint = true;
     }
 
+    /// Why the server turned the login away, in words for the player, once; afterwards (and before) "". The main menu
+    /// polls this from the UI thread, because UI calls made from the network worker threads don't draw anything.
+    Red::CString TakeLoginRejectedMessage();
+
+    /// Writes a line from redscript into this plugin's RED4ext log.
+    void Log(const Red::CString& message);
+
     /// Sends a packet from shared/protocol/Protocol.h; its channel and reliability come from the schema.
     template<typename T>
     bool EnqueueMessage(const T& packet);
@@ -75,6 +86,8 @@ private:
 
 RTTI_DEFINE_CLASS(NetworkGameSystem, {
     RTTI_METHOD(EnqueueLoadLastCheckpoint);
+    RTTI_METHOD(TakeLoginRejectedMessage);
+    RTTI_METHOD(Log);
     RTTI_PROPERTY(FullyConnected);
     RTTI_PROPERTY(playerActionTracker);
     RTTI_ALIAS("Cyberverse.Network.Managers.NetworkGameSystem");

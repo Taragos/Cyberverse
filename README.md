@@ -52,6 +52,23 @@ triggering packets, callbacks on packets).
 
 Any change to the schema changes the protocol version, so client and server have to be built from the same schema.
 
+## Versions
+A client may join when its protocol version (a hash of `protocol.yaml`) matches the server's, its mod version is the
+same release, and its game version is allowed. Otherwise the server sends a message saying which version to install
+(for now only in the client's RED4ext log), logs the reason and closes the connection.
+
+- **Mod version:** `git describe --tags --dirty`, stamped into both builds (`shared/version/CyberverseVersion.cmake`,
+  `server/Managed/Cyberverse.Server.csproj`). `v0.3.1-12-gaba70a7` belongs to release `v0.3.1`; untagged builds are all
+  `dev` and meet each other. Tag releases as `vX.Y.Z`. The Docker build has no `.git`; pass
+  `--build-arg CYBERVERSE_VERSION=$(git describe --tags --always --dirty --match "v[0-9]*")`.
+- **Game version:** `server.json` in the server's working directory, or the environment variable
+  `CYBERVERSE_ALLOWED_GAME_VERSIONS=2.31,2.3.1`. `"2.31"` allows every 2.31.x; an empty list allows any.
+  ```json
+  { "allowedGameVersions": ["2.31"] }
+  ```
+- **Login packets:** `InitAuth` and `InitAuthResult` are frozen, so any old client can still read why it was rejected
+  (see the top of `protocol.yaml`).
+
 ## Required Client dependencies
 - RED4ext
 - Redscript

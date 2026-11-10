@@ -1,6 +1,8 @@
 ﻿using System.Diagnostics;
 using Cyberverse.Server.NativeLayer;
+using Cyberverse.Server.Config;
 using Cyberverse.Server.PacketHandling;
+using Cyberverse.Server.Protocol;
 using NLog;
 
 namespace Cyberverse.Server;
@@ -10,9 +12,14 @@ public class Program
     static void Main(string[] args)
     {
         InitLogging();
-        LogManager.GetCurrentClassLogger().Info("Starting Cyberverse Server 0.0.1 (c) 2023-2025 MeFisto94");
+        var logger = LogManager.GetCurrentClassLogger();
+        logger.Info($"Starting Cyberverse Server {BuildInfo.ModVersion}, protocol 0x{ProtocolInfo.Version:X8} (c) 2023-2025 MeFisto94");
+        var config = ServerConfig.Load(ServerConfig.FileName, Environment.GetEnvironmentVariable);
+        logger.Info(config.AllowedGameVersions.Length == 0
+            ? "Allowing any game version"
+            : $"Allowing game versions {string.Join(", ", config.AllowedGameVersions)}");
         var server = new GameServer(1337);
-        AddTypicalPacketHandlers(server);
+        AddTypicalPacketHandlers(server, config);
         
         var quit = false;
 
@@ -29,10 +36,11 @@ public class Program
         Native.destroy_gameserver();
     }
 
-    private static void AddTypicalPacketHandlers(GameServer server)
+    private static void AddTypicalPacketHandlers(GameServer server, ServerConfig config)
     {
         // TODO: Store the auth handler somewhere
-        new AuthPacketHandler().RegisterOnServer(server);
+        var versionCheck = new LoginVersionCheck(ProtocolInfo.Version, BuildInfo.ModVersion, config.AllowedGameVersions);
+        new AuthPacketHandler(versionCheck).RegisterOnServer(server);
         new PlayerPacketHandler().RegisterOnServer(server);
     }
     

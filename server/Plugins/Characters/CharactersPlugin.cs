@@ -90,7 +90,7 @@ public sealed class CharactersPlugin : IPlugin, ICharacterProvider
             var positions = _sessions.Keys.Select(Position).OfType<(Guid, float, float, float, float)>().ToList();
             if (positions.Count > 0)
             {
-                Track(_store.SavePositionsAsync(positions));
+                Track(_store.SavePositionsAsync(positions), $"Saved the positions of {positions.Count} character(s) at shutdown");
             }
         }
 
@@ -296,6 +296,13 @@ public sealed class CharactersPlugin : IPlugin, ICharacterProvider
         }));
     }
 
+    /// <summary>Tracks the write, and logs the line once it succeeded.</summary>
+    private void Track(Task task, string saved)
+    {
+        Track(task);
+        task.ContinueWith(_ => _logger.Info(saved), TaskContinuationOptions.OnlyOnRanToCompletion);
+    }
+
     private void Track(Task task)
     {
         lock (_writes)
@@ -345,7 +352,9 @@ public sealed class CharactersPlugin : IPlugin, ICharacterProvider
         // PlayerLeft comes before the entity is removed, so the last position is still there.
         if (Position(player.ConnectionId) is { } position)
         {
-            Track(_store!.SavePositionsAsync([position]));
+            var (_, x, y, z, _) = position;
+            var name = _sessions[player.ConnectionId].Playing!.Name;
+            Track(_store!.SavePositionsAsync([position]), $"Saved {name} at ({x:F0}, {y:F0}, {z:F0})");
         }
 
         _sessions.Remove(player.ConnectionId);
@@ -362,7 +371,7 @@ public sealed class CharactersPlugin : IPlugin, ICharacterProvider
         var positions = _sessions.Keys.Select(Position).OfType<(Guid, float, float, float, float)>().ToList();
         if (positions.Count > 0)
         {
-            Track(_store.SavePositionsAsync(positions, _stopping.Token));
+            Track(_store.SavePositionsAsync(positions, _stopping.Token), $"Saved the positions of {positions.Count} character(s)");
         }
     }
 

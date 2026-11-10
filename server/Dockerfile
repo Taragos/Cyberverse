@@ -19,9 +19,11 @@ RUN cmake -DCMAKE_TOOLCHAIN_FILE:STRING=${VCPKG_ROOT}/scripts/buildsystems/vcpkg
 RUN cmake --build /workspace/build --config Debug --target all --
 
 FROM mcr.microsoft.com/dotnet/sdk:10.0 AS sdk
-WORKDIR /source
+WORKDIR /source/Managed
 
-ADD Managed /source
+# The server references the plugin API project next to it.
+ADD Api /source/Api
+ADD Managed /source/Managed
 RUN dotnet restore
 # The build context has no .git, so the mod version comes in as an argument:
 #   docker build --build-arg CYBERVERSE_VERSION=$(git describe --tags --always --dirty --match "v[0-9]*") server
@@ -34,6 +36,7 @@ WORKDIR /app
 COPY --from=base /workspace/build/src/*.so .
 COPY --from=base /workspace/build/vcpkg_installed/x64-linux/debug/lib/*.so .
 COPY --from=sdk /app .
+# Plugins go in /app/plugins/<Assembly>/, their configs in /app/config/; mount both as volumes to keep them.
 # TODO: When trying to resolve libGameNetworkingSockets, ldd uses system locations and libCyberM.Server.Native's RPATH (/workspace/build/vcpkg_installed/x64-linux/)
 # but the .so is actually in the PWD, so we set the LD_LIBRARY_PATH (that was previously empty) to that. We could/should migrate to CMAKE using the correct
 # linker flags to set RPATH to "." (who cares about /workspace/build), but that probably needs OS specific defines to only run on linux

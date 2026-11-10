@@ -27,8 +27,8 @@ touch it.
 
 ### Server.Managed
 The main logic of the game server. It reads and writes packets with the code generated from the schema
-(`server/Managed/Protocol/`), performs high level logic, bookkeeping, calls potential plugins and then enqueues packets
-on its own again.
+(`server/Api/Protocol/`), performs high level logic and bookkeeping, runs the plugins (see "Plugins") and then enqueues
+packets on its own again. `server/Api` is the part plugins compile against.
 
 ### Client.RED4extModule
 This is the C++ side in the game that handles networking and bridges between the redscript utility functions
@@ -45,12 +45,32 @@ triggering packets, callbacks on packets).
 1. Add it to `shared/protocol/protocol.yaml` (direction, id, channel, reliable, fields; the file explains the format).
 2. Run `dotnet run server/Tools/GenerateProtocol.cs` (on Linux without the .NET SDK: `tools/linux/test-server.sh --generate`,
    which also runs the tests). It writes `shared/protocol/Protocol.h` for the client and
-   `server/Managed/Protocol/Generated/Protocol.g.cs` for the server. Commit both with the schema; CI fails if they are
+   `server/Api/Protocol/Generated/Protocol.g.cs` for the server. Commit both with the schema; CI fails if they are
    out of date.
-3. Server: `server.AddPacketHandler<MyPacket>(handler)` for serverbound packets, `server.EnqueueMessage(connectionId, packet)`
-   for clientbound ones. Client: `EnqueueMessage(packet)`, or a `case` in `NetworkGameSystem::PollIncomingMessages`.
+3. Server: `context.Packets.Register<MyPacket>(handler)` in a plugin for serverbound packets (several handlers per packet
+   are fine), `IConnections.Send(connectionId, packet)` for clientbound ones. Client: `EnqueueMessage(packet)`, or a `case` in `NetworkGameSystem::PollIncomingMessages`.
 
 Any change to the schema changes the protocol version, so client and server have to be built from the same schema.
+
+## Plugins
+Server features live in plugins: classes implementing `IPlugin` from `server/Api`. The login and player sync are
+built-in plugins (`server/Managed/PacketHandling/`); `server/Plugins/Example` is a small one to copy.
+
+- **Install:** `dotnet publish <plugin project> -o <server>/plugins/<AssemblyName>` and restart. Each folder in
+  `plugins/` holds one plugin assembly named like the folder (or the folder's only `.dll`) with its dependencies, loaded
+  in its own `AssemblyLoadContext`. There's no hot reload. The `plugins` console command lists what loaded.
+- **Write one:** reference `server/Api/Cyberverse.Server.Api.csproj` with `Private="false" ExcludeAssets="runtime"` and
+  `<EnableDynamicLoading>true</EnableDynamicLoading>`. In `OnLoad`, use the context: `Packets.Register<T>`,
+  `Events.Subscribe<PlayerJoinedWorld>` (also `PlayerAuthenticated`, `PlayerLeft`, or your own event types),
+  `Commands.Register`, `Services` (`IPlayerService`, `IConnections`, and services other plugins add in
+  `ConfigureServices`), `LoadConfig<T>()` for `config/<name>.json`, and `Logger`. What you register through the
+  context is removed when the plugin fails or unloads.
+- **Order and failures:** `PluginInfo.DependsOn` names the plugins that load first. A plugin that throws, or whose
+  dependency is missing or failed, is logged and skipped; the server keeps running. A handler or subscriber that
+  throws is logged and the others still run.
+- **Console:** type commands into the server's stdin: `help`, `plugins`, `stop`.
+- **Docker:** mount `/app/plugins` and `/app/config`; the config folder must be writable by the container user
+  (`$APP_UID`, 1654), since a plugin writes its default config there on the first start.
 
 ## Versions
 A client may join when its protocol version (a hash of `protocol.yaml`) matches the server's, its mod version is the

@@ -1,0 +1,19 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    An example plugin, also loaded by the server tests. Install it with
+      dotnet publish server/Plugins/Example -o <server>/plugins/Cyberverse.Plugin.Example
+  -->
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <EnableDynamicLoading>true</EnableDynamicLoading>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- The server provides the API: don't copy it (or its dependencies) next to the plugin. -->
+    <ProjectReference Include="..\..\Api\Cyberverse.Server.Api.csproj" Private="false" ExcludeAssets="runtime" />
+  </ItemGroup>
+
+</Project>

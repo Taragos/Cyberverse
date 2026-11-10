@@ -30,13 +30,13 @@ public class EntityTracker
             RecordId = entity.RecordId,
             SpawnPosition = entity.WorldTransform
         };
-        _server.EnqueueMessage(connectionId, spawnEntity);
+        _server.Send(connectionId, spawnEntity);
     }
 
     private void SendDespawnPacket(ulong networkEntityId, uint connectionId)
     {
         var destroyEntity = new DestroyEntity { NetworkedEntityId = networkEntityId };
-        _server.EnqueueMessage(connectionId, destroyEntity);
+        _server.Send(connectionId, destroyEntity);
     } 
 
     public void OnStartTrackingEntity(Player player, Entity entity)
@@ -132,7 +132,7 @@ public class EntityTracker
                 };
 
                 //Console.WriteLine($"[{DateTime.Now.ToLongTimeString()}] Teleporting {entity.networkedEntityId} for {player.ConnectionId}");
-                _server.EnqueueMessage(player.ConnectionId, teleportEntity);
+                _server.Send(player.ConnectionId, teleportEntity);
             }
             else
             {

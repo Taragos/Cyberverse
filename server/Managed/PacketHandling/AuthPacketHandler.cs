@@ -1,21 +1,36 @@
+using Cyberverse.Server.Events;
+using Cyberverse.Server.Networking;
+using Cyberverse.Server.Plugins;
 using Cyberverse.Server.Protocol;
 using Cyberverse.Server.Services;
 using Cyberverse.Server.Types;
+using Microsoft.Extensions.DependencyInjection;
 using NLog;
 
 namespace Cyberverse.Server.PacketHandling;
 
-public class AuthPacketHandler(LoginVersionCheck versionCheck)
+/// <summary>Built-in plugin: the login (InitAuth). Checks the versions and adds the player.</summary>
+public class AuthPacketHandler(LoginVersionCheck versionCheck) : IPlugin
 {
     /// <summary>The GameNetworkingSockets end reason for a rejected login (application reasons start at 1000).</summary>
     public const int LoginRejectedReason = 1001;
 
     private static readonly Logger Logger = LogManager.GetCurrentClassLogger();
     private PlayerService? _players = null;
+    private IConnections? _connections = null;
+    private IEventBus? _events = null;
 
-    protected virtual void HandleInitAuth(GameServer server, EMessageTypeServerbound messageType, byte channelId, uint connectionId, InitAuth content)
+    public PluginInfo Info { get; } = new("auth", BuildInfo.ModVersion);
+
+    protected virtual void HandleInitAuth(uint connectionId, InitAuth content)
     {
         Logger.Trace($"Connection request from {content.Username}");
+
+        if (_players!.ConnectedPlayers.TryGetValue(connectionId, out var existing))
+        {
+            Logger.Warn($"Ignored a second InitAuth from connection {connectionId} ({existing.Name})");
+            return;
+        }
 
         var result = versionCheck.Check(content.ProtocolVersion, content.ModVersion, content.GameVersion);
         InitAuthResult resultPacket = default;
@@ -24,26 +39,34 @@ public class AuthPacketHandler(LoginVersionCheck versionCheck)
         resultPacket.AuthResult = result.AuthResult;
         resultPacket.Message = result.Message;
 
+        Player? player = null;
         if (result.Ok)
         {
             //const auto validation = m_authController.ValidateUser(init_auth->username);
             // TODO: Check if there is an active player with that uuid already (that requires having non-username logins first, and also breaks my local dev for now!)
             Logger.Info($"{content.Username} joined (connection {connectionId}, mod {content.ModVersion}, game {content.GameVersion})");
-            _players!.ConnectedPlayers.Add(connectionId, new Player { Name = content.Username, ConnectionId = connectionId });
+            player = new Player { Name = content.Username, ConnectionId = connectionId };
+            _players.ConnectedPlayers.Add(connectionId, player);
         }
 
-        server.EnqueueMessage(connectionId, resultPacket);
+        _connections!.Send(connectionId, resultPacket);
 
-        if (!result.Ok)
+        if (player != null)
+        {
+            _events!.Publish(new PlayerAuthenticated(player));
+        }
+        else
         {
             Logger.Info($"Rejected {content.Username} (connection {connectionId}): {result.LogReason}");
-            server.CloseConnection(connectionId, LoginRejectedReason, $"Login rejected: {result.AuthResult}");
+            _connections.Disconnect(connectionId, LoginRejectedReason, $"Login rejected: {result.AuthResult}");
         }
     }
 
-    public virtual void RegisterOnServer(GameServer server)
+    public void OnLoad(IPluginContext context)
     {
-        _players = server.PlayerService;
-        server.AddPacketHandler<InitAuth>(HandleInitAuth);
+        _players = context.Services.GetRequiredService<PlayerService>();
+        _connections = context.Services.GetRequiredService<IConnections>();
+        _events = context.Events;
+        context.Packets.Register<InitAuth>(HandleInitAuth);
     }
 }

@@ -1,4 +1,6 @@
-﻿using Cyberverse.Server.NativeLayer;
+﻿using Cyberverse.Server.Events;
+using Cyberverse.Server.NativeLayer;
+using Cyberverse.Server.Networking;
 using Cyberverse.Server.PacketHandling;
 using Cyberverse.Server.Protocol;
 using Cyberverse.Server.Services;
@@ -6,50 +8,47 @@ using NLog;
 
 namespace Cyberverse.Server;
 
-public class GameServer: NativeGameServer
+public class GameServer : NativeGameServer, IConnections
 {
     private static readonly Logger Logger = LogManager.GetCurrentClassLogger();
-    private readonly Dictionary<ushort, HandleRawPacket> _packetHandlers = new();
     private readonly PacketWriter _writer = new();
+    private readonly PacketDispatcher _packets;
+    private readonly IEventBus _events;
 
     public readonly EntityService EntityService;
     public readonly EntityTracker EntityTracker;
-    public readonly PlayerService PlayerService = new();
+    public readonly PlayerService PlayerService;
 
-    public GameServer(ushort listeningPort) : base(listeningPort)
+    public GameServer(ushort listeningPort, PacketDispatcher packets, IEventBus events, PlayerService players,
+        EntityService entities) : base(listeningPort)
     {
+        _packets = packets;
+        _events = events;
+        PlayerService = players;
+        EntityService = entities;
         EntityTracker = new EntityTracker(this);
-        EntityService = new EntityService();
-    }
-
-    /// <summary>
-    /// Calls handler for every packet of type T. A packet that fails to read (truncated, oversized, unknown enum value,
-    /// trailing bytes) is logged and dropped before it reaches the handler.
-    /// </summary>
-    public void AddPacketHandler<T>(HandlePacket<T> handler) where T : struct, IServerBoundPacket<T>
-    {
-        _packetHandlers.Add(T.MessageId, (frame, connectionId, body) =>
-        {
-            if (!Packet.TryRead<T>(body, out var packet))
-            {
-                Logger.Warn($"Dropped a malformed {typeof(T).Name} ({body.Length} bytes) from connection {connectionId}");
-                return;
-            }
-
-            handler(this, (EMessageTypeServerbound)frame.MessageId, frame.Channel, connectionId, packet);
-        });
     }
 
     protected override void OnConnectionStateChange(ESteamNetworkingConnectionState state, uint connectionId)
     {
         Logger.Trace($"{connectionId} changed state to {state}");
 
-        // TODO: More handling of player connection states. Cleanup routines, pre-auth states, ...
-        if (state is ESteamNetworkingConnectionState.ClosedByPeer or ESteamNetworkingConnectionState.ProblemDetectedLocally)
+        // Called from native code: an exception must not get back there.
+        try
         {
-            RemovePlayer(connectionId);
+            // TODO: More handling of player connection states. Cleanup routines, pre-auth states, ...
+            if (state is ESteamNetworkingConnectionState.ClosedByPeer or ESteamNetworkingConnectionState.ProblemDetectedLocally)
+            {
+                RemovePlayer(connectionId);
+            }
+        }
+        catch (Exception e)
+        {
+            Logger.Error(e, $"Handling the state change of connection {connectionId} to {state} threw");
         }
     }
+
+    public bool Disconnect(uint connectionId, int reason, string debug) => CloseConnection(connectionId, reason, debug);
 
     /// <summary>Closes a connection from the server's side and cleans up after its player, if it had signed in.</summary>
     public override bool CloseConnection(uint connectionId, int reason, string debug)
@@ -68,6 +67,8 @@ public class GameServer: NativeGameServer
         }
 
         Logger.Info($"Player {player.Name} disconnected");
+        _events.Publish(new PlayerLeft(player));
+
         var playerEntities = EntityService.SpawnedEntities
             .Select(x => x.Value)
             .Where(x => x.NetworkIdOwner == connectionId)
@@ -92,6 +93,11 @@ public class GameServer: NativeGameServer
             {
                 ProcessMessage(msg);
             }
+            catch (Exception e)
+            {
+                // Handlers' exceptions are caught by the dispatcher; this is for the framing itself.
+                Logger.Error(e, $"Processing a message from connection {msg.ConnectionId} threw");
+            }
             finally
             {
                 ReleaseMessage(msg);
@@ -100,7 +106,7 @@ public class GameServer: NativeGameServer
     }
 
     /// <summary>Sends a packet; its message id, channel and reliability come from the schema.</summary>
-    public bool EnqueueMessage<T>(uint connectionId, T packet) where T : struct, IClientBoundPacket<T>
+    public bool Send<T>(uint connectionId, T packet) where T : struct, IClientBoundPacket<T>
     {
         _writer.Reset();
         Packet.Write(_writer, packet);
@@ -116,12 +122,9 @@ public class GameServer: NativeGameServer
             return;
         }
 
-        if (_packetHandlers.TryGetValue(frame.MessageId, out var handler))
+        if (_packets.Dispatch(frame.MessageId, message.ConnectionId, message.Span[MessageFrame.Size..]) == DispatchResult.NoHandler)
         {
-            handler(frame, message.ConnectionId, message.Span[MessageFrame.Size..]);
-            return;
+            Logger.Warn($"No message handler for type {(EMessageTypeServerbound)frame.MessageId}");
         }
-
-        Logger.Warn($"No message handler for type {(EMessageTypeServerbound)frame.MessageId}");
     }
 }

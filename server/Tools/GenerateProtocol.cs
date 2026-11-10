@@ -1,6 +1,6 @@
 // Generates both sides of the wire protocol from shared/protocol/protocol.yaml, the only place packets are defined:
 //   shared/protocol/Protocol.h                        C++ structs for the client (serialized with zpp_bits)
-//   server/Managed/Protocol/Generated/Protocol.g.cs   C# structs with their reader and writer
+//   server/Api/Protocol/Generated/Protocol.g.cs   C# structs with their reader and writer
 //
 //   dotnet run server/Tools/GenerateProtocol.cs            write both files
 //   dotnet run server/Tools/GenerateProtocol.cs -- --check  fail if either file is out of date (CI)
@@ -44,7 +44,7 @@ catch (SchemaException e)
 var outputs = new Dictionary<string, string>
 {
     [Path.Combine(root, "shared", "protocol", "Protocol.h")] = Gen.Lf(CppEmitter.Emit(schema)),
-    [Path.Combine(root, "server", "Managed", "Protocol", "Generated", "Protocol.g.cs")] = Gen.Lf(CsEmitter.Emit(schema)),
+    [Path.Combine(root, "server", "Api", "Protocol", "Generated", "Protocol.g.cs")] = Gen.Lf(CsEmitter.Emit(schema)),
 };
 
 var stale = 0;

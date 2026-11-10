@@ -16,6 +16,8 @@
 
   <ItemGroup>
     <ProjectReference Include="..\Managed\Cyberverse.Server.csproj" />
+    <!-- Copied into a plugins folder by PluginLoaderTests; the tests never use its types directly. -->
+    <ProjectReference Include="..\Plugins\Example\Cyberverse.Plugin.Example.csproj" />
   </ItemGroup>
 
   <ItemGroup>

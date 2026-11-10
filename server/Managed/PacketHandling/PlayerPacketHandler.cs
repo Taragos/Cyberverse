@@ -1,12 +1,16 @@
-﻿using Cyberverse.Server.Protocol;
+﻿using Cyberverse.Server.Events;
+using Cyberverse.Server.Plugins;
+using Cyberverse.Server.Protocol;
 using Cyberverse.Server.Services;
 using Cyberverse.Server.TweakDb.Generated;
 using Cyberverse.Server.Types;
+using Microsoft.Extensions.DependencyInjection;
 using NLog;
 
 namespace Cyberverse.Server.PacketHandling;
 
-public class PlayerPacketHandler
+/// <summary>Built-in plugin: players joining the world, moving, spawning cars and equipping items.</summary>
+public class PlayerPacketHandler : IPlugin
 {
     private static readonly Logger Logger = LogManager.GetCurrentClassLogger();
     private static readonly Random Random = new();
@@ -16,9 +20,13 @@ public class PlayerPacketHandler
         Character.wakako_okada, Character.Yorinobu];
     
     private EntityTracker? _tracker = null;
+    private EntityService? _entities = null;
     private PlayerService? _players = null;
+    private IEventBus? _events = null;
 
-    protected void HandleJoinWorld(GameServer server, EMessageTypeServerbound messageType, byte channelId, uint connectionId, PlayerJoinWorld content)
+    public PluginInfo Info { get; } = new("player-sync", BuildInfo.ModVersion, "auth");
+
+    protected void HandleJoinWorld(uint connectionId, PlayerJoinWorld content)
     {
         if (_players!.ConnectedPlayers.TryGetValue(connectionId, out var player))
         {
@@ -26,12 +34,13 @@ public class PlayerPacketHandler
                 content.Position.X, content.Position.Y, content.Position.Z);
 
             var choice = Random.Next(PossiblePlayerNpcChoice.Length);
-            var entity = server.EntityService.CreateEntity(PossiblePlayerNpcChoice[choice]);
+            var entity = _entities!.CreateEntity(PossiblePlayerNpcChoice[choice]);
             entity.WorldTransform = content.Position; // Spawn the entity at the right spot already
             entity.NetworkIdOwner = player.ConnectionId;
                 
             // Since we only call the tracking for moved entities, force sync every entity to that player:
             _tracker!.InitialSpawnForPlayer(player);
+            _events!.Publish(new PlayerJoinedWorld(player, content.Position));
         }
         else
         {
@@ -39,8 +48,7 @@ public class PlayerPacketHandler
         }
     }
 
-    protected void HandlePositionUpdate(GameServer server, EMessageTypeServerbound messageType, byte channelId,
-        uint connectionId, PlayerPositionUpdate content)
+    protected void HandlePositionUpdate(uint connectionId, PlayerPositionUpdate content)
     {
         // // TODO: Implement differently, don't teleport.
         // TeleportEntity teleportEntity = default;
@@ -57,7 +65,7 @@ public class PlayerPacketHandler
         // EnqueueMessage(outputMessage);
 
         var playerEntities =
-            server.EntityService.SpawnedEntities.Values.Where(tty => tty.NetworkIdOwner == connectionId);
+            _entities!.SpawnedEntities.Values.Where(tty => tty.NetworkIdOwner == connectionId);
         foreach (var entity in playerEntities)
         {
             //Console.WriteLine($"Move {player.Name} ({player.ConnectionId} / {message.connectionId}) to ({positionUpdate.WorldTransform.X}, {positionUpdate.WorldTransform.Y}, {positionUpdate.WorldTransform.Z})");
@@ -79,17 +87,16 @@ public class PlayerPacketHandler
         }
     }
 
-    protected void HandleSpawnCar(GameServer server, EMessageTypeServerbound messageType, byte channelId,
-        uint connectionId, PlayerSpawnCar content)
+    protected void HandleSpawnCar(uint connectionId, PlayerSpawnCar content)
     {
         var hash = RecordIdUtils.RecordIdToCrcHash(content.RecordId);
         var len = RecordIdUtils.RecordIdToNameLength(content.RecordId);
         
         Logger.Trace($"Player spawned a {hash} [{len}] at {content.WorldTransform}");
         
-        DespawnAllVehiclesForPlayer(server, connectionId);
+        DespawnAllVehiclesForPlayer(connectionId);
 
-        var entity = server.EntityService.CreateEntity(content.RecordId);
+        var entity = _entities!.CreateEntity(content.RecordId);
         entity.WorldTransform = content.WorldTransform; // Spawn the entity at the right spot already
         entity.Yaw = content.Yaw;
         entity.NetworkIdOwner = connectionId;
@@ -98,10 +105,10 @@ public class PlayerPacketHandler
         _tracker!.UpdateTrackingOf(entity);
     }
 
-    private void DespawnAllVehiclesForPlayer(GameServer server, uint connectionId)
+    private void DespawnAllVehiclesForPlayer(uint connectionId)
     {
         // Try to find existing cars for that owner.
-        var existingVehicles = server.EntityService.SpawnedEntities
+        var existingVehicles = _entities!.SpawnedEntities
             .Select(x => x.Value)
             .Where(x => x.NetworkIdOwner == connectionId)
             .Where(x => x.IsVehicle)
@@ -111,24 +118,22 @@ public class PlayerPacketHandler
         {
             vehicle.NetworkIdOwner = 0;
             _tracker!.StopTrackingOf(vehicle);
-            server.EntityService.RemoveEntity(vehicle.NetworkedEntityId);
+            _entities!.RemoveEntity(vehicle.NetworkedEntityId);
         }
     }
 
-    protected void HandleUnmountCar(GameServer server, EMessageTypeServerbound messageType, byte channelId,
-        uint connectionId, PlayerUnmountCar content)
+    protected void HandleUnmountCar(uint connectionId, PlayerUnmountCar content)
     {
-        DespawnAllVehiclesForPlayer(server, connectionId);
+        DespawnAllVehiclesForPlayer(connectionId);
     }
 
-    private void HandleEquip(GameServer server, EMessageTypeServerbound messageType, byte channelId,
-        uint connectionId, PlayerEquipItem content)
+    private void HandleEquip(uint connectionId, PlayerEquipItem content)
     {
         Logger.Info($"Player did (un: {content.IsUnequipping})equip an item (slot {content.Slot}). Is it a weapon? {content.IsWeapon}");
         if (content.IsUnequipping)
         {
             // Try to find existing cars for that owner.
-            var existingItems = server.EntityService.SpawnedEntities
+            var existingItems = _entities!.SpawnedEntities
                 .Select(x => x.Value)
                 .Where(x => x.NetworkIdOwner == connectionId)
                 .Where(x => x.RecordId == content.ItemId)
@@ -139,14 +144,14 @@ public class PlayerPacketHandler
             {
                 item.NetworkIdOwner = 0;
                 _tracker!.StopTrackingOf(item);
-                server.EntityService.RemoveEntity(item.NetworkedEntityId);
+                _entities!.RemoveEntity(item.NetworkedEntityId);
             }
         }
         else
         {
             // TODO: How are we supposed to flag things as items? dedicated maps? But it'll still be entities in the end.
             // Also this is relevant when we have our own EquipItemEntity. Right now they are entities in the world.
-            var playerEntity = server.EntityService.SpawnedEntities
+            var playerEntity = _entities!.SpawnedEntities
                 .Select(x => x.Value)
                 .FirstOrDefault(x => x.NetworkIdOwner == connectionId);
 
@@ -155,7 +160,7 @@ public class PlayerPacketHandler
                 return;
             }
             
-            var entity = server.EntityService.CreateEntity(content.ItemId);
+            var entity = _entities!.CreateEntity(content.ItemId);
             entity.WorldTransform = playerEntity.WorldTransform; // TODO
             entity.Yaw = playerEntity.Yaw; // TODO
             entity.NetworkIdOwner = connectionId;
@@ -165,22 +170,23 @@ public class PlayerPacketHandler
         }
     }
 
-    private void HandleShoot(GameServer server, EMessageTypeServerbound messageType, byte channelId,
-        uint connectionId, PlayerShoot content)
+    private void HandleShoot(uint connectionId, PlayerShoot content)
     {
         Logger.Warn($"Shots fired! {content.ItemIdWeapon} at {content.StartPoint}");
     }
 
-    public void RegisterOnServer(GameServer server)
+    public void OnLoad(IPluginContext context)
     {
-        _tracker = server.EntityTracker; // TODO: Service registry or even using DI
-        _players = server.PlayerService;
-        
-        server.AddPacketHandler<PlayerJoinWorld>(HandleJoinWorld);
-        server.AddPacketHandler<PlayerPositionUpdate>(HandlePositionUpdate);
-        server.AddPacketHandler<PlayerSpawnCar>(HandleSpawnCar);
-        server.AddPacketHandler<PlayerUnmountCar>(HandleUnmountCar);
-        server.AddPacketHandler<PlayerEquipItem>(HandleEquip);
-        server.AddPacketHandler<PlayerShoot>(HandleShoot);
+        _tracker = context.Services.GetRequiredService<EntityTracker>();
+        _entities = context.Services.GetRequiredService<EntityService>();
+        _players = context.Services.GetRequiredService<PlayerService>();
+        _events = context.Events;
+
+        context.Packets.Register<PlayerJoinWorld>(HandleJoinWorld);
+        context.Packets.Register<PlayerPositionUpdate>(HandlePositionUpdate);
+        context.Packets.Register<PlayerSpawnCar>(HandleSpawnCar);
+        context.Packets.Register<PlayerUnmountCar>(HandleUnmountCar);
+        context.Packets.Register<PlayerEquipItem>(HandleEquip);
+        context.Packets.Register<PlayerShoot>(HandleShoot);
     }
 }

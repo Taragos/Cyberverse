@@ -5,3 +5,5 @@ Native/vcpkg_installed
 Managed/obj
 Managed/bin
 Native/build
+Api/obj
+Api/bin

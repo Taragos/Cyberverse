@@ -1,6 +1,7 @@
 #include "NetworkGameSystem.h"
 
 #include "CommandLine.h"
+#include "SessionStore.h"
 #include "Main.h"
 #include "Utils.h"
 
@@ -20,6 +21,9 @@
 #include <zpp_bits.h>
 
 #include <lmcons.h> // UNLEN
+#include <shellapi.h> // ShellExecuteW
+
+#include <thread>
 
 bool NetworkGameSystem::Load()
 {
@@ -36,9 +40,58 @@ void NetworkGameSystem::Unload()
     GameNetworkingSockets_Kill();
 }
 
+namespace
+{
+// The protocol wants UTF-8; the Windows APIs give UTF-16.
+std::string WideToUtf8(const wchar_t* text, int length)
+{
+    std::string result;
+    if (length <= 0)
+    {
+        return result;
+    }
+
+    result.resize(WideCharToMultiByte(CP_UTF8, 0, text, length, nullptr, 0, nullptr, nullptr));
+    WideCharToMultiByte(CP_UTF8, 0, text, length, result.data(), static_cast<int>(result.size()), nullptr, nullptr);
+    return result;
+}
+
+std::wstring Utf8ToWide(const std::string& text)
+{
+    std::wstring result;
+    if (text.empty())
+    {
+        return result;
+    }
+
+    const auto length = static_cast<int>(text.size());
+    result.resize(MultiByteToWideChar(CP_UTF8, 0, text.data(), length, nullptr, 0));
+    MultiByteToWideChar(CP_UTF8, 0, text.data(), length, result.data(), static_cast<int>(result.size()));
+    return result;
+}
+
+/// Opens the server's login link in the default browser. Only http(s): the link comes from the server, and anything
+/// else (file:, custom protocol handlers) could start programs on this PC.
+void OpenLoginInBrowser(const std::string& url)
+{
+    if (url.rfind("https://", 0) != 0 && url.rfind("http://", 0) != 0)
+    {
+        SDK->logger->WarnF(PLUGIN, "Not opening the login link, it isn't http(s): %s", url.c_str());
+        return;
+    }
+
+    // Off the game thread: starting the browser can take a moment.
+    std::thread([wide = Utf8ToWide(url)] {
+        ShellExecuteW(nullptr, L"open", wide.c_str(), nullptr, nullptr, SW_SHOWNORMAL);
+    }).detach();
+}
+} // namespace
+
 bool NetworkGameSystem::ConnectToServer(const std::string& host, uint16_t port)
 {
     SDK->logger->InfoF(PLUGIN, "Trying to connect to server at %s:%d", host.c_str(), port);
+    m_serverHost = host;
+    m_serverPort = port;
 
     if (m_pInterface != nullptr)
     {
@@ -129,35 +182,59 @@ void NetworkGameSystem::ConnectionStatusChangedCallback(SteamNetConnectionStatus
 
     if (pInfo->m_info.m_eState == k_ESteamNetworkingConnectionState_Connected)
     {
-        // The protocol wants UTF-8, but GetUserNameA returns the system code page, so convert from the wide variant.
-        wchar_t wide_name[UNLEN + 1];
-        DWORD wide_len = UNLEN + 1; // In: buffer size, out: length including the null terminator
-        std::string username;
-        if (GetUserNameW(wide_name, &wide_len) && wide_len > 1)
-        {
-            const auto name_len = static_cast<int>(wide_len - 1);
-            username.resize(WideCharToMultiByte(CP_UTF8, 0, wide_name, name_len, nullptr, 0, nullptr, nullptr));
-            WideCharToMultiByte(CP_UTF8, 0, wide_name, name_len, username.data(), static_cast<int>(username.size()),
-                                nullptr, nullptr);
-        }
-
         SDK->logger->Info(PLUGIN, "Socket connected, authenticating");
-        InitAuth auth_packet = {};
-        auth_packet.protocolVersion = PROTOCOL_VERSION_CURRENT;
-        auth_packet.username = username;
-        auth_packet.modVersion = CYBERVERSE_VERSION;
-        // The product version, e.g. 2.31.0; hotfixes of one patch share it.
-        const auto* game = SDK->runtime;
-        auth_packet.gameVersion = std::to_string(game->major) + "." + std::to_string(game->minor) + "." +
-                                  std::to_string(game->patch);
-        SDK->logger->InfoF(PLUGIN, "Cyberverse %s, game %s, protocol 0x%08X", CYBERVERSE_VERSION,
-                           auth_packet.gameVersion.c_str(), PROTOCOL_VERSION_CURRENT);
-
         // TODO: Maybe we could manage this singleton access better? But then, the Game's GameSystem Container is the owner of "this"
-        Red::GetGameSystem<NetworkGameSystem>()->EnqueueMessage(auth_packet);
+        Red::GetGameSystem<NetworkGameSystem>()->SendLogin();
     } else {
         Red::GetGameSystem<NetworkGameSystem>()->FullyConnected = false;
     }
+}
+
+void NetworkGameSystem::SendLogin()
+{
+    // The Windows account name: only a hint for the server's logs, the account comes from the browser login.
+    wchar_t wide_name[UNLEN + 1];
+    DWORD wide_len = UNLEN + 1; // In: buffer size, out: length including the null terminator
+    InitAuth auth_packet = {};
+    if (GetUserNameW(wide_name, &wide_len) && wide_len > 1)
+    {
+        auth_packet.username = WideToUtf8(wide_name, static_cast<int>(wide_len - 1));
+    }
+
+    auth_packet.protocolVersion = PROTOCOL_VERSION_CURRENT;
+    auth_packet.modVersion = CYBERVERSE_VERSION;
+    // The product version, e.g. 2.31.0; hotfixes of one patch share it.
+    const auto* game = SDK->runtime;
+    auth_packet.gameVersion = std::to_string(game->major) + "." + std::to_string(game->minor) + "." +
+                              std::to_string(game->patch);
+    SDK->logger->InfoF(PLUGIN, "Cyberverse %s, game %s, protocol 0x%08X", CYBERVERSE_VERSION,
+                       auth_packet.gameVersion.c_str(), PROTOCOL_VERSION_CURRENT);
+    EnqueueMessage(auth_packet);
+
+    // Right behind InitAuth on the same reliable channel, so it arrives second.
+    LoginWithSession login = {};
+    login.sessionToken = SessionStore::Load(SessionStore::PathFor(m_serverHost, m_serverPort));
+    if (login.sessionToken.size() > 128)
+    {
+        login.sessionToken.clear(); // not one the server issued
+    }
+    wchar_t computer[MAX_COMPUTERNAME_LENGTH + 1];
+    DWORD computer_len = MAX_COMPUTERNAME_LENGTH + 1; // In: buffer size, out: length without the null terminator
+    if (GetComputerNameW(computer, &computer_len))
+    {
+        login.deviceName = WideToUtf8(computer, static_cast<int>(computer_len)).substr(0, 64);
+    }
+    SDK->logger->Info(PLUGIN, login.sessionToken.empty() ? "Logging in without a saved session"
+                                                         : "Logging in with the saved session");
+    EnqueueMessage(login);
+}
+
+Red::CString NetworkGameSystem::TakeLoginPrompt()
+{
+    std::lock_guard lock(m_loginRejectedMutex);
+    Red::CString prompt(m_loginPrompt.c_str());
+    m_loginPrompt.clear();
+    return prompt;
 }
 
 void NetworkGameSystem::Log(const Red::CString& message)
@@ -330,6 +407,51 @@ void NetworkGameSystem::PollIncomingMessages()
                 break;
             default:
                 break; // logged above
+            }
+        }
+        break;
+
+        case EMessageTypeClientbound::LoginRequired:
+        {
+            LoginRequired login_required = {};
+            if (zpp::bits::failure(in(login_required)))
+            {
+                SDK->logger->Error(PLUGIN, "Faulty packet: LoginRequired");
+                pIncomingMsg->Release();
+                continue;
+            }
+
+            SDK->logger->InfoF(PLUGIN, "Log in in the browser at %s (code %s, valid for %u seconds)",
+                               login_required.verificationUri.c_str(), login_required.userCode.c_str(),
+                               login_required.expiresInSeconds);
+            {
+                std::lock_guard lock(m_loginRejectedMutex);
+                m_loginPrompt = "Log in in your browser to join. If it didn't open, go to " +
+                                login_required.verificationUri + " and check that it shows the code " +
+                                login_required.userCode + ".";
+            }
+            OpenLoginInBrowser(login_required.verificationUri);
+        }
+        break;
+
+        case EMessageTypeClientbound::SessionIssued:
+        {
+            SessionIssued session = {};
+            if (zpp::bits::failure(in(session)))
+            {
+                SDK->logger->Error(PLUGIN, "Faulty packet: SessionIssued");
+                pIncomingMsg->Release();
+                continue;
+            }
+
+            const auto path = SessionStore::PathFor(m_serverHost, m_serverPort);
+            if (SessionStore::Save(path, session.sessionToken))
+            {
+                SDK->logger->Info(PLUGIN, "Saved the session; the next join from this PC skips the browser");
+            }
+            else
+            {
+                SDK->logger->WarnF(PLUGIN, "Could not save the session to %s", path.string().c_str());
             }
         }
         break;

@@ -7,6 +7,8 @@ public native class NetworkGameSystem extends IGameSystem {
     native let playerActionTracker: ref<PlayerActionTracker>;
     public native func EnqueueLoadLastCheckpoint(handler: wref<inkISystemRequestsHandler>) -> Void;
     public native func TakeLoginRejectedMessage() -> String;
+    // The browser login link and code while the server waits for it, once; else "". Not shown on screen yet (CYB-00023).
+    public native func TakeLoginPrompt() -> String;
     public native func Log(message: String) -> Void;
     
     public func SpawnTransientEntity(entityName: TweakDBID, worldPosition: Vector4, worldOrientation: Quaternion) -> EntityID {

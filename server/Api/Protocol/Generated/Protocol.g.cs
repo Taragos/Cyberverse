@@ -9,7 +9,7 @@ namespace Cyberverse.Server.Protocol;
 public static class ProtocolInfo
 {
     /// <summary>A hash of protocol.yaml. The client sends it at login; the server rejects a different one.</summary>
-    public const uint Version = 0x74BF4AE9;
+    public const uint Version = 0xD94C8427;
 }
 
 public enum EMessageTypeServerbound : ushort
@@ -22,6 +22,7 @@ public enum EMessageTypeServerbound : ushort
     PlayerUnmountCar = 6,
     PlayerEquipItem = 7,
     PlayerShoot = 8,
+    LoginWithSession = 9,
 }
 
 public enum EMessageTypeClientbound : ushort
@@ -31,6 +32,8 @@ public enum EMessageTypeClientbound : ushort
     TeleportEntity = 2,
     DestroyEntity = 3,
     EquipItemEntity = 4,
+    LoginRequired = 5,
+    SessionIssued = 6,
 }
 
 /// <summary>ValidationFailed covers everything from a wrong password to being banned. Part of the frozen InitAuthResult.</summary>
@@ -307,6 +310,34 @@ public partial struct PlayerShoot : IServerBoundPacket<PlayerShoot>
     }
 }
 
+/// <summary>Sent right after InitAuth. The server answers with InitAuthResult once the login is decided; in between it may send LoginRequired (the player has to log in in the browser) and SessionIssued.</summary>
+public partial struct LoginWithSession : IServerBoundPacket<LoginWithSession>
+{
+    public static ushort MessageId => 9;
+    public static byte Channel => 0;
+    public static bool Reliable => true;
+    public static EMessageTypeServerbound MessageType => EMessageTypeServerbound.LoginWithSession;
+
+    /// <summary>The token from an earlier SessionIssued, or empty for none. At most 128 bytes.</summary>
+    public string SessionToken;
+    /// <summary>The PC's name, so players can tell their sessions apart. At most 64 bytes.</summary>
+    public string DeviceName;
+
+    public readonly void Write(PacketWriter writer)
+    {
+        writer.WriteString(SessionToken, 128);
+        writer.WriteString(DeviceName, 64);
+    }
+
+    public static bool TryRead(ref PacketReader reader, out LoginWithSession value)
+    {
+        value = default;
+        if (!reader.TryReadString(128, out value.SessionToken)) return false;
+        if (!reader.TryReadString(64, out value.DeviceName)) return false;
+        return true;
+    }
+}
+
 /// <summary>The answer to InitAuth. Frozen, see the top of this file. After any result but Ok the server closes the connection.</summary>
 public partial struct InitAuthResult : IClientBoundPacket<InitAuthResult>
 {
@@ -450,6 +481,61 @@ public partial struct EquipItemEntity : IClientBoundPacket<EquipItemEntity>
         if (!reader.TryReadU64(out value.ItemId)) return false;
         if (!reader.TryReadBool(out value.IsWeapon)) return false;
         if (!reader.TryReadBool(out value.IsUnequipping)) return false;
+        return true;
+    }
+}
+
+/// <summary>The session token was missing or no longer valid. The player logs in in the browser while the client waits.</summary>
+public partial struct LoginRequired : IClientBoundPacket<LoginRequired>
+{
+    public static ushort MessageId => 5;
+    public static byte Channel => 0;
+    public static bool Reliable => true;
+    public static EMessageTypeClientbound MessageType => EMessageTypeClientbound.LoginRequired;
+
+    /// <summary>The login page with the code filled in. At most 512 bytes.</summary>
+    public string VerificationUri;
+    /// <summary>The code to compare with the one the login page shows. At most 32 bytes.</summary>
+    public string UserCode;
+    public uint ExpiresInSeconds;
+
+    public readonly void Write(PacketWriter writer)
+    {
+        writer.WriteString(VerificationUri, 512);
+        writer.WriteString(UserCode, 32);
+        writer.WriteU32(ExpiresInSeconds);
+    }
+
+    public static bool TryRead(ref PacketReader reader, out LoginRequired value)
+    {
+        value = default;
+        if (!reader.TryReadString(512, out value.VerificationUri)) return false;
+        if (!reader.TryReadString(32, out value.UserCode)) return false;
+        if (!reader.TryReadU32(out value.ExpiresInSeconds)) return false;
+        return true;
+    }
+}
+
+/// <summary>A new session for this PC. The client saves the token and sends it in LoginWithSession next time.</summary>
+public partial struct SessionIssued : IClientBoundPacket<SessionIssued>
+{
+    public static ushort MessageId => 6;
+    public static byte Channel => 0;
+    public static bool Reliable => true;
+    public static EMessageTypeClientbound MessageType => EMessageTypeClientbound.SessionIssued;
+
+    /// <summary>At most 128 bytes.</summary>
+    public string SessionToken;
+
+    public readonly void Write(PacketWriter writer)
+    {
+        writer.WriteString(SessionToken, 128);
+    }
+
+    public static bool TryRead(ref PacketReader reader, out SessionIssued value)
+    {
+        value = default;
+        if (!reader.TryReadString(128, out value.SessionToken)) return false;
         return true;
     }
 }

@@ -10,12 +10,34 @@ public enum DispatchResult
     Handled,
     NoHandler,
     Malformed,
+
+    /// <summary>The connection hasn't logged in and the packet isn't allowed before that.</summary>
+    NotLoggedIn,
 }
 
-public sealed class PacketDispatcher : IPacketDispatcher
+/// <param name="isLoggedIn">
+/// Whether a connection has a player. Packets from connections without one are dropped unless they were allowed with
+/// <see cref="AllowBeforeLogin{T}"/>. Null lets every packet through (for tests).
+/// </param>
+public sealed class PacketDispatcher(Func<uint, bool>? isLoggedIn = null) : IPacketDispatcher
 {
     private static readonly Logger Logger = LogManager.GetCurrentClassLogger();
     private readonly Dictionary<ushort, IRoute> _routes = new();
+
+    // Message id -> how many registrations allow it before the login.
+    private readonly Dictionary<ushort, int> _beforeLogin = new();
+
+    public IDisposable AllowBeforeLogin<T>() where T : struct, IServerBoundPacket<T>
+    {
+        _beforeLogin[T.MessageId] = _beforeLogin.GetValueOrDefault(T.MessageId) + 1;
+        return new Disposable(() =>
+        {
+            if (--_beforeLogin[T.MessageId] == 0)
+            {
+                _beforeLogin.Remove(T.MessageId);
+            }
+        });
+    }
 
     public IDisposable Register<T>(PacketHandler<T> handler) where T : struct, IServerBoundPacket<T>
     {
@@ -37,8 +59,15 @@ public sealed class PacketDispatcher : IPacketDispatcher
     }
 
     /// <summary>Reads the packet once and runs every handler for its message id. Logs malformed packets and handler errors.</summary>
-    public DispatchResult Dispatch(ushort messageId, uint connectionId, ReadOnlySpan<byte> body) =>
-        _routes.TryGetValue(messageId, out var route) ? route.Dispatch(connectionId, body) : DispatchResult.NoHandler;
+    public DispatchResult Dispatch(ushort messageId, uint connectionId, ReadOnlySpan<byte> body)
+    {
+        if (isLoggedIn != null && !_beforeLogin.ContainsKey(messageId) && !isLoggedIn(connectionId))
+        {
+            return DispatchResult.NotLoggedIn;
+        }
+
+        return _routes.TryGetValue(messageId, out var route) ? route.Dispatch(connectionId, body) : DispatchResult.NoHandler;
+    }
 
     private interface IRoute
     {

@@ -16,4 +16,10 @@ public interface IPacketDispatcher
     /// Dispose the result to remove the handler. Throws when another packet type already uses T's message id.
     /// </summary>
     IDisposable Register<T>(PacketHandler<T> handler) where T : struct, IServerBoundPacket<T>;
+
+    /// <summary>
+    /// Lets packets of type T through before the connection has logged in. Every other packet from a connection without
+    /// a player is dropped. Only for packets that are part of the login. Dispose the result to undo it.
+    /// </summary>
+    IDisposable AllowBeforeLogin<T>() where T : struct, IServerBoundPacket<T>;
 }

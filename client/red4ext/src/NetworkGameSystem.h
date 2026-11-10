@@ -98,6 +98,8 @@ public:
     bool CreateCharacter(const Red::CString& firstName, const Red::CString& lastName);
     bool SelectCharacter(const Red::CString& characterId);
     bool DeleteCharacter(const Red::CString& characterId);
+    /// Stores the look of the character being played (the encoded editor options). False when not connected.
+    bool SendCharacterAppearance(const Red::CString& appearance);
 
     /// Sends a packet from shared/protocol/Protocol.h; its channel and reliability come from the schema.
     template<typename T>
@@ -124,6 +126,7 @@ RTTI_DEFINE_CLASS(NetworkGameSystem, {
     RTTI_METHOD(CreateCharacter);
     RTTI_METHOD(SelectCharacter);
     RTTI_METHOD(DeleteCharacter);
+    RTTI_METHOD(SendCharacterAppearance);
     RTTI_PROPERTY(FullyConnected);
     RTTI_PROPERTY(playerActionTracker);
     RTTI_ALIAS("Cyberverse.Network.Managers.NetworkGameSystem");

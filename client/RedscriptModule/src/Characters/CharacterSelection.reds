@@ -4,8 +4,9 @@ import Cyberverse.Network.Managers.*
 import Cyberverse.Ui.*
 
 // The character select and create popups (CYB-00009). The server sends CharacterList once the game has loaded the
-// world; the player picks, creates or deletes a character here, and CharacterSpawned closes the popups and moves the
-// player to where the character was. The server's packets arrive on the plugin's network thread, so everything they
+// world; the player picks, creates or deletes a character here, and CharacterSpawned closes the popups, applies the
+// character's look (or opens the editor for a character without one, see AppearanceEditor.reds) and moves the player to
+// where the character was. The server's packets arrive on the plugin's network thread, so everything they
 // trigger goes through WorldUi, which also waits until the world's UI can draw popups.
 
 public class CharacterSelection extends ScriptableService {
@@ -13,6 +14,10 @@ public class CharacterSelection extends ScriptableService {
     private let m_popup: ref<CharacterPopup>;
     // A list arrived and no character is played yet: the select popup should be open.
     private let m_choosing: Bool;
+    // Where Play moves the character once its look is done.
+    private let m_pendingTeleport: Bool;
+    private let m_pendingPosition: Vector4;
+    private let m_pendingYaw: Float;
 
     public static func Get() -> ref<CharacterSelection> {
         return GameInstance.GetScriptableServiceContainer()
@@ -32,6 +37,7 @@ public class CharacterSelection extends ScriptableService {
         this.m_popup = null;
         this.m_controller = null;
         this.m_choosing = false;
+        this.m_pendingTeleport = false;
     }
 
     // From the plugin, on its network thread.
@@ -44,9 +50,9 @@ public class CharacterSelection extends ScriptableService {
         WorldUi.Get().WhenReady(CharacterRequestFailedShow.Create(message));
     }
 
-    public func OnSpawned(name: String, teleport: Bool, position: Vector4, yaw: Float) {
+    public func OnSpawned(name: String, teleport: Bool, position: Vector4, yaw: Float, appearance: String) {
         this.m_choosing = false;
-        WorldUi.Get().WhenReady(CharacterSpawnedApply.Create(name, teleport, position, yaw));
+        WorldUi.Get().WhenReady(CharacterSpawnedApply.Create(name, teleport, position, yaw, appearance));
     }
 
     // From here on, from WorldUi with the world's UI ready.
@@ -57,12 +63,25 @@ public class CharacterSelection extends ScriptableService {
         }
     }
 
-    public func Spawn(name: String, teleport: Bool, position: Vector4, yaw: Float) {
-        CharacterSelection.Log("playing " + name + (teleport ? ", moving to its saved place" : ""));
+    // Applies the look first: the hidden editor doesn't load during the teleport's loading screen, and this way its
+    // short menu background runs straight into that loading screen. A character without a look gets the editor on
+    // screen; it teleports once the player confirms or backs out.
+    public func Spawn(name: String, teleport: Bool, position: Vector4, yaw: Float, appearance: String) {
+        CharacterSelection.Log("playing " + name + (teleport ? ", moving to its saved place" : "")
+            + (StrLen(appearance) == 0 ? ", no look yet" : ""));
         this.ClosePopup();
-        if !teleport {
+        this.m_pendingTeleport = teleport;
+        this.m_pendingPosition = position;
+        this.m_pendingYaw = yaw;
+        AppearanceEditor.Get().Start(appearance);
+    }
+
+    // From AppearanceEditor once the look is applied, stored or skipped.
+    public func OnAppearanceDone() {
+        if !this.m_pendingTeleport {
             return;
         }
+        this.m_pendingTeleport = false;
 
         let game = GetGameInstance();
         let player = GetPlayer(game);
@@ -72,8 +91,8 @@ public class CharacterSelection extends ScriptableService {
         }
 
         let rotation: EulerAngles;
-        rotation.Yaw = yaw;
-        GameInstance.GetTeleportationFacility(game).Teleport(player, position, rotation);
+        rotation.Yaw = this.m_pendingYaw;
+        GameInstance.GetTeleportationFacility(game).Teleport(player, this.m_pendingPosition, rotation);
     }
 
     public func ShowSelect(controller: ref<inkGameController>) {
@@ -144,17 +163,20 @@ public class CharacterSpawnedApply extends WorldUiAction {
     private let m_teleport: Bool;
     private let m_position: Vector4;
     private let m_yaw: Float;
+    private let m_appearance: String;
 
     public func Run(controller: ref<inkGameController>) {
-        CharacterSelection.Get().Spawn(this.m_name, this.m_teleport, this.m_position, this.m_yaw);
+        CharacterSelection.Get().Spawn(this.m_name, this.m_teleport, this.m_position, this.m_yaw, this.m_appearance);
     }
 
-    public static func Create(name: String, teleport: Bool, position: Vector4, yaw: Float) -> ref<CharacterSpawnedApply> {
+    public static func Create(name: String, teleport: Bool, position: Vector4, yaw: Float, appearance: String)
+        -> ref<CharacterSpawnedApply> {
         let self = new CharacterSpawnedApply();
         self.m_name = name;
         self.m_teleport = teleport;
         self.m_position = position;
         self.m_yaw = yaw;
+        self.m_appearance = appearance;
         return self;
     }
 }

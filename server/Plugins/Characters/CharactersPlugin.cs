@@ -245,7 +245,8 @@ public sealed class CharactersPlugin : IPlugin, ICharacterProvider
         }
 
         session.Playing = playing with { Appearance = packet.Appearance };
-        Track(_store!.SaveAppearanceAsync(id, packet.Appearance, _stopping.Token));
+        Track(_store!.SaveAppearanceAsync(id, packet.Appearance, _stopping.Token),
+            $"Saved the look of {playing.Name} ({packet.Appearance.Length} characters)");
     }
 
     /// <summary>Checks a select-screen request may run now; sends the player why not.</summary>

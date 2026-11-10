@@ -21,6 +21,8 @@ public native class NetworkGameSystem extends IGameSystem {
     public native func CreateCharacter(firstName: String, lastName: String) -> Bool;
     public native func SelectCharacter(characterId: String) -> Bool;
     public native func DeleteCharacter(characterId: String) -> Bool;
+    // Stores the look of the character being played (CharacterAppearanceEditor's encoding).
+    public native func SendCharacterAppearance(appearance: String) -> Bool;
 
     // Called by the plugin when the server's character packets arrive.
     public func OnCharacterList() {
@@ -31,8 +33,8 @@ public native class NetworkGameSystem extends IGameSystem {
         CharacterSelection.Get().OnFailed(message);
     }
 
-    public func OnCharacterSpawned(name: String, teleport: Bool, position: Vector4, yaw: Float) {
-        CharacterSelection.Get().OnSpawned(name, teleport, position, yaw);
+    public func OnCharacterSpawned(name: String, teleport: Bool, position: Vector4, yaw: Float, appearance: String) {
+        CharacterSelection.Get().OnSpawned(name, teleport, position, yaw, appearance);
     }
     
     public func SpawnTransientEntity(entityName: TweakDBID, worldPosition: Vector4, worldOrientation: Quaternion) -> EntityID {

@@ -290,7 +290,7 @@ bool NetworkGameSystem::CreateCharacter(const Red::CString& firstName, const Red
     CharacterCreate create = {};
     create.firstName = firstName.c_str();
     create.lastName = lastName.c_str();
-    return EnqueueMessage(create); // The appearance comes with the character creator (CYB-00009 scope).
+    return EnqueueMessage(create); // The look follows from the editor after the first Play (SendCharacterAppearance).
 }
 
 bool NetworkGameSystem::SelectCharacter(const Red::CString& characterId)
@@ -314,6 +314,18 @@ bool NetworkGameSystem::DeleteCharacter(const Red::CString& characterId)
 
     CharacterDelete request = {};
     request.characterId = characterId.c_str();
+    return EnqueueMessage(request);
+}
+
+bool NetworkGameSystem::SendCharacterAppearance(const Red::CString& appearance)
+{
+    if (!FullyConnected)
+    {
+        return false;
+    }
+
+    CharacterAppearance request = {};
+    request.appearance = appearance.c_str();
     return EnqueueMessage(request);
 }
 
@@ -701,7 +713,7 @@ void NetworkGameSystem::PollIncomingMessages()
                                spawned.teleport ? ", moving to its saved place" : "");
             const RED4ext::Vector4 position = { spawned.position.x, spawned.position.y, spawned.position.z, 1.0f };
             Red::CallVirtual(this, "OnCharacterSpawned", Red::CString(spawned.name.c_str()), spawned.teleport,
-                             position, spawned.yaw);
+                             position, spawned.yaw, Red::CString(spawned.appearance.c_str()));
         }
         break;
 

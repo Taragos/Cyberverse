@@ -42,6 +42,8 @@ private:
     // The server we connect to; the session token is saved per server.
     std::string m_serverHost;
     uint16_t m_serverPort = 0;
+    // --cyberverse-profile: which saved login to use; empty for the default one (CYB-00031).
+    std::string m_profile;
     // The account's characters from the last CharacterList, for the select popup (CYB-00009).
     std::mutex m_charactersMutex;
     std::vector<CharacterInfo> m_characters;

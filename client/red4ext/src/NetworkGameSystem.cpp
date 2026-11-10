@@ -147,6 +147,11 @@ void NetworkGameSystem::OnNetworkUpdate(RED4ext::FrameInfo& frame_info, RED4ext:
         const auto commandLine = GetCommandLineA();
         const auto host = ParseHostFromCommandLine(commandLine);
         const auto port = ParsePortFromCommandLine(commandLine);
+        if (const auto profile = ParseProfileFromCommandLine(commandLine); profile.has_value() && !profile->empty())
+        {
+            m_profile = profile.value();
+            SDK->logger->InfoF(PLUGIN, "Using the saved login of profile '%s'", m_profile.c_str());
+        }
         if (host.has_value() && port.has_value())
         {
             ConnectToServer(host.value(), port.value());
@@ -218,7 +223,7 @@ void NetworkGameSystem::SendLogin()
 
     // Right behind InitAuth on the same reliable channel, so it arrives second.
     LoginWithSession login = {};
-    login.sessionToken = SessionStore::Load(SessionStore::PathFor(m_serverHost, m_serverPort));
+    login.sessionToken = SessionStore::Load(SessionStore::PathFor(m_serverHost, m_serverPort, m_profile));
     if (login.sessionToken.size() > 128)
     {
         login.sessionToken.clear(); // not one the server issued
@@ -531,7 +536,7 @@ void NetworkGameSystem::PollIncomingMessages()
                 continue;
             }
 
-            const auto path = SessionStore::PathFor(m_serverHost, m_serverPort);
+            const auto path = SessionStore::PathFor(m_serverHost, m_serverPort, m_profile);
             if (SessionStore::Save(path, session.sessionToken))
             {
                 SDK->logger->Info(PLUGIN, "Saved the session; the next join from this PC skips the browser");

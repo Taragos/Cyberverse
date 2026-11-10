@@ -103,6 +103,16 @@ serverbound:
       - itemIdWeapon: { type: u64, doc: "The weapon's TweakDBID; should become the item id." }
       - startPoint: Vector3
       - charge: f32
+  LoginWithSession:
+    id: 9
+    channel: 0
+    reliable: true
+    doc: >-
+      Sent right after InitAuth. The server answers with InitAuthResult once the login is decided; in between it may
+      send LoginRequired (the player has to log in in the browser) and SessionIssued.
+    fields:
+      - sessionToken: { type: string, max: 128, doc: "The token from an earlier SessionIssued, or empty for none" }
+      - deviceName: { type: string, max: 64, doc: "The PC's name, so players can tell their sessions apart" }
 
 clientbound:
   InitAuthResult:
@@ -148,3 +158,19 @@ clientbound:
       - itemId: u64
       - isWeapon: bool
       - isUnequipping: bool
+  LoginRequired:
+    id: 5
+    channel: 0
+    reliable: true
+    doc: The session token was missing or no longer valid. The player logs in in the browser while the client waits.
+    fields:
+      - verificationUri: { type: string, max: 512, doc: "The login page with the code filled in" }
+      - userCode: { type: string, max: 32, doc: "The code to compare with the one the login page shows" }
+      - expiresInSeconds: u32
+  SessionIssued:
+    id: 6
+    channel: 0
+    reliable: true
+    doc: A new session for this PC. The client saves the token and sends it in LoginWithSession next time.
+    fields:
+      - sessionToken: { type: string, max: 128 }

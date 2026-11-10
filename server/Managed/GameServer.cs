@@ -4,6 +4,7 @@ using Cyberverse.Server.Networking;
 using Cyberverse.Server.PacketHandling;
 using Cyberverse.Server.Protocol;
 using Cyberverse.Server.Services;
+using Cyberverse.Server.Threading;
 using NLog;
 
 namespace Cyberverse.Server;
@@ -14,15 +15,17 @@ public class GameServer : NativeGameServer, IConnections
     private readonly PacketWriter _writer = new();
     private readonly PacketDispatcher _packets;
     private readonly IEventBus _events;
+    private readonly ServerThread _thread;
 
     public readonly EntityService EntityService;
     public readonly EntityTracker EntityTracker;
     public readonly PlayerService PlayerService;
 
     public GameServer(ushort listeningPort, PacketDispatcher packets, IEventBus events, PlayerService players,
-        EntityService entities) : base(listeningPort)
+        EntityService entities, ServerThread thread) : base(listeningPort)
     {
         _packets = packets;
+        _thread = thread;
         _events = events;
         PlayerService = players;
         EntityService = entities;
@@ -36,10 +39,9 @@ public class GameServer : NativeGameServer, IConnections
         // Called from native code: an exception must not get back there.
         try
         {
-            // TODO: More handling of player connection states. Cleanup routines, pre-auth states, ...
             if (state is ESteamNetworkingConnectionState.ClosedByPeer or ESteamNetworkingConnectionState.ProblemDetectedLocally)
             {
-                RemovePlayer(connectionId);
+                CleanUpConnection(connectionId);
             }
         }
         catch (Exception e)
@@ -50,25 +52,24 @@ public class GameServer : NativeGameServer, IConnections
 
     public bool Disconnect(uint connectionId, int reason, string debug) => CloseConnection(connectionId, reason, debug);
 
-    /// <summary>Closes a connection from the server's side and cleans up after its player, if it had signed in.</summary>
+    /// <summary>Closes a connection from the server's side and cleans up after it.</summary>
     public override bool CloseConnection(uint connectionId, int reason, string debug)
     {
         var closed = base.CloseConnection(connectionId, reason, debug);
-        RemovePlayer(connectionId);
+        CleanUpConnection(connectionId);
         return closed;
     }
 
-    private void RemovePlayer(uint connectionId)
+    /// <summary>Removes the connection's player (if it logged in) and every entity it owns.</summary>
+    private void CleanUpConnection(uint connectionId)
     {
-        if (!PlayerService.ConnectedPlayers.TryGetValue(connectionId, out var player))
+        if (PlayerService.ConnectedPlayers.TryGetValue(connectionId, out var player))
         {
-            // someone connected but never signed in
-            return;
+            Logger.Info($"Player {player.Name} disconnected");
+            _events.Publish(new PlayerLeft(player));
         }
 
-        Logger.Info($"Player {player.Name} disconnected");
-        _events.Publish(new PlayerLeft(player));
-
+        // Also without a player: the login gate keeps such connections from spawning anything, but nothing may leak.
         var playerEntities = EntityService.SpawnedEntities
             .Select(x => x.Value)
             .Where(x => x.NetworkIdOwner == connectionId)
@@ -82,11 +83,13 @@ public class GameServer : NativeGameServer, IConnections
         }
 
         PlayerService.ConnectedPlayers.Remove(connectionId);
+        _events.Publish(new ConnectionClosed(connectionId));
     }
 
     public override void Update(float deltaTime)
     {
         base.Update(deltaTime);
+        _thread.RunPending();
         for (var msg = PollIncomingMessage(); !msg.IsEmpty; msg = PollIncomingMessage())
         {
             try
@@ -103,6 +106,8 @@ public class GameServer : NativeGameServer, IConnections
                 ReleaseMessage(msg);
             }
         }
+
+        _events.Publish(new ServerTick(DateTime.UtcNow));
     }
 
     /// <summary>Sends a packet; its message id, channel and reliability come from the schema.</summary>
@@ -122,9 +127,15 @@ public class GameServer : NativeGameServer, IConnections
             return;
         }
 
-        if (_packets.Dispatch(frame.MessageId, message.ConnectionId, message.Span[MessageFrame.Size..]) == DispatchResult.NoHandler)
+        switch (_packets.Dispatch(frame.MessageId, message.ConnectionId, message.Span[MessageFrame.Size..]))
         {
-            Logger.Warn($"No message handler for type {(EMessageTypeServerbound)frame.MessageId}");
+            case DispatchResult.NoHandler:
+                Logger.Warn($"No message handler for type {(EMessageTypeServerbound)frame.MessageId}");
+                break;
+            case DispatchResult.NotLoggedIn:
+                Logger.Debug($"Dropped {(EMessageTypeServerbound)frame.MessageId} from connection {message.ConnectionId}, " +
+                             "which hasn't logged in");
+                break;
         }
     }
 }

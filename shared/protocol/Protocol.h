@@ -9,7 +9,7 @@
 #include <vector>
 
 /// A hash of protocol.yaml. The client sends it at login; the server rejects a different one.
-constexpr uint32_t PROTOCOL_VERSION_CURRENT = 0x74BF4AE9;
+constexpr uint32_t PROTOCOL_VERSION_CURRENT = 0xD94C8427;
 
 /// The 4 bytes in front of every packet. zpp_bits writes the struct, then the packet's fields.
 struct MessageFrame
@@ -29,6 +29,7 @@ enum class EMessageTypeServerbound : uint16_t
     PlayerUnmountCar = 6,
     PlayerEquipItem = 7,
     PlayerShoot = 8,
+    LoginWithSession = 9,
 };
 
 enum class EMessageTypeClientbound : uint16_t
@@ -38,6 +39,8 @@ enum class EMessageTypeClientbound : uint16_t
     TeleportEntity = 2,
     DestroyEntity = 3,
     EquipItemEntity = 4,
+    LoginRequired = 5,
+    SessionIssued = 6,
 };
 
 /// ValidationFailed covers everything from a wrong password to being banned. Part of the frozen InitAuthResult.
@@ -199,6 +202,25 @@ struct PlayerShoot
     }
 };
 
+/// Sent right after InitAuth. The server answers with InitAuthResult once the login is decided; in between it may send LoginRequired (the player has to log in in the browser) and SessionIssued.
+struct LoginWithSession
+{
+    /// The token from an earlier SessionIssued, or empty for none. At most 128 bytes.
+    std::string sessionToken{};
+    /// The PC's name, so players can tell their sessions apart. At most 64 bytes.
+    std::string deviceName{};
+
+    static constexpr EMessageTypeServerbound MessageType = EMessageTypeServerbound::LoginWithSession;
+    static constexpr uint8_t Channel = 0;
+    static constexpr bool Reliable = true;
+
+    static void FillMessageFrame(MessageFrame& frame)
+    {
+        frame.channel_id = Channel;
+        frame.message_type = static_cast<uint16_t>(MessageType);
+    }
+};
+
 // clientbound packets
 
 /// The answer to InitAuth. Frozen, see the top of this file. After any result but Ok the server closes the connection.
@@ -281,6 +303,43 @@ struct EquipItemEntity
     bool isUnequipping{};
 
     static constexpr EMessageTypeClientbound MessageType = EMessageTypeClientbound::EquipItemEntity;
+    static constexpr uint8_t Channel = 0;
+    static constexpr bool Reliable = true;
+
+    static void FillMessageFrame(MessageFrame& frame)
+    {
+        frame.channel_id = Channel;
+        frame.message_type = static_cast<uint16_t>(MessageType);
+    }
+};
+
+/// The session token was missing or no longer valid. The player logs in in the browser while the client waits.
+struct LoginRequired
+{
+    /// The login page with the code filled in. At most 512 bytes.
+    std::string verificationUri{};
+    /// The code to compare with the one the login page shows. At most 32 bytes.
+    std::string userCode{};
+    uint32_t expiresInSeconds{};
+
+    static constexpr EMessageTypeClientbound MessageType = EMessageTypeClientbound::LoginRequired;
+    static constexpr uint8_t Channel = 0;
+    static constexpr bool Reliable = true;
+
+    static void FillMessageFrame(MessageFrame& frame)
+    {
+        frame.channel_id = Channel;
+        frame.message_type = static_cast<uint16_t>(MessageType);
+    }
+};
+
+/// A new session for this PC. The client saves the token and sends it in LoginWithSession next time.
+struct SessionIssued
+{
+    /// At most 128 bytes.
+    std::string sessionToken{};
+
+    static constexpr EMessageTypeClientbound MessageType = EMessageTypeClientbound::SessionIssued;
     static constexpr uint8_t Channel = 0;
     static constexpr bool Reliable = true;
 

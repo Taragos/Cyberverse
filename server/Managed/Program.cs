@@ -10,6 +10,7 @@ using Cyberverse.Server.Players;
 using Cyberverse.Server.Plugins;
 using Cyberverse.Server.Protocol;
 using Cyberverse.Server.Services;
+using Cyberverse.Server.Threading;
 using Microsoft.Extensions.DependencyInjection;
 using NLog;
 
@@ -43,10 +44,11 @@ public class Program
             : $"Allowing game versions {string.Join(", ", config.AllowedGameVersions)}");
         var players = new PlayerService();
         var entities = new EntityService();
-        var packets = new PacketDispatcher();
+        var packets = new PacketDispatcher(players.ConnectedPlayers.ContainsKey);
         var events = new EventBus();
         var commands = new CommandRegistry();
-        var server = new GameServer(1337, packets, events, players, entities);
+        var thread = new ServerThread();
+        var server = new GameServer(1337, packets, events, players, entities, thread);
 
         var services = new ServiceCollection()
             .AddSingleton(config)
@@ -58,7 +60,8 @@ public class Program
             .AddSingleton(server.EntityTracker)
             .AddSingleton<IPacketDispatcher>(packets)
             .AddSingleton<IEventBus>(events)
-            .AddSingleton<ICommandRegistry>(commands);
+            .AddSingleton<ICommandRegistry>(commands)
+            .AddSingleton<IServerThread>(thread);
 
         var stopping = new CancellationTokenSource();
         var host = new PluginHost(services, ConfigDirectory);

@@ -26,8 +26,8 @@ public class ProtocolWireTests
     [Fact]
     public void EveryPacketIsCovered()
     {
-        // 8 serverbound and 5 clientbound packets when this was written; the list itself comes from reflection.
-        Assert.Equal(13, PacketTypes.Count());
+        // 9 serverbound and 7 clientbound packets when this was written; the list itself comes from reflection.
+        Assert.Equal(16, PacketTypes.Count());
     }
 
     [Theory]

@@ -80,6 +80,9 @@ internal sealed class PluginContext : IPluginContext
     {
         public IDisposable Register<T>(PacketHandler<T> handler) where T : struct, IServerBoundPacket<T> =>
             Track(registrations, inner.Register(handler));
+
+        public IDisposable AllowBeforeLogin<T>() where T : struct, IServerBoundPacket<T> =>
+            Track(registrations, inner.AllowBeforeLogin<T>());
     }
 
     private sealed class ScopedEvents(IEventBus inner, List<IDisposable> registrations) : IEventBus

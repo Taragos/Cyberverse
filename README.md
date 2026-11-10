@@ -72,6 +72,15 @@ built-in plugins (`server/Managed/PacketHandling/`); `server/Plugins/Example` is
 - **Docker:** mount `/app/plugins` and `/app/config`; the config folder must be writable by the container user
   (`$APP_UID`, 1654), since a plugin writes its default config there on the first start.
 
+## Server logs
+Each start writes everything the console shows, plus console commands and their replies, to its own file
+`logs/server-<date>_<time>.log`, and the same lines to `logs/latest.log`. The startup line names the file. The last 20
+runs are kept. `tools/linux/run-server.sh` puts them in `server/run/logs/` so rebuilds don't delete them.
+
+- **Level:** `"logLevel": "Debug"` in `server.json` or `CYBERVERSE_LOG_LEVEL=Debug` (Trace, Debug, Info, Warn, Error,
+  Fatal). Default: Trace for Debug builds, Info for Release builds.
+- **Folder:** `"logDirectory"` in `server.json` or `CYBERVERSE_LOG_DIR`, relative to the working directory.
+
 ## Versions
 A client may join when its protocol version (a hash of `protocol.yaml`) matches the server's, its mod version is the
 same release, and its game version is allowed. Otherwise the server sends a message saying which version to install
@@ -113,6 +122,7 @@ which is cross-compiled with clang-cl, lld-link and the MSVC CRT/Windows SDK fet
 | `tools/linux/build-client.sh` | Builds `Cyberverse.Red4Ext.dll` and `GameNetworkingSockets.dll` into `client/red4ext/build/linux-cross/src/` |
 | `tools/linux/install-client.sh` | Copies the plugin and the redscript module into a mod folder of an MO2-style mod manager (Amethyst, MO2) and enables it. Set `CYBERVERSE_STAGING` and `CYBERVERSE_PROFILE` for your setup, then deploy in the mod manager |
 | `tools/linux/run-server.sh` | Builds the server (native library in the build container, C# in the .NET SDK container) and starts it on UDP port 1337. Needs the .NET 10 runtime on the host |
+| `tools/linux/last-server-log.sh` | Prints the log of the latest local server run; `-w` only warnings and errors, `-n 50` the last lines, `-f` follow, `-r 2` the run before |
 | `tools/linux/build-server.sh --image` | Builds the deployable server image (`server/Dockerfile`) |
 
 To join, start the game with `--cyberverse-server-address=<ip> --cyberverse-server-port=1337` (with Steam, after

@@ -25,10 +25,12 @@ public class Program
 
     static void Main(string[] args)
     {
-        InitLogging();
+        var config = ServerConfig.Load(ServerConfig.FileName, Environment.GetEnvironmentVariable);
+        var logLevel = config.ResolveLogLevel();
+        var logFile = Logging.Configure(logLevel, config.LogDirectory, DateTime.Now);
         var logger = LogManager.GetCurrentClassLogger();
         logger.Info($"Starting Cyberverse Server {BuildInfo.ModVersion}, protocol 0x{ProtocolInfo.Version:X8} (c) 2023-2025 MeFisto94");
-        var config = ServerConfig.Load(ServerConfig.FileName, Environment.GetEnvironmentVariable);
+        logger.Info($"Logging at level {logLevel} to {logFile}");
         logger.Info(config.AllowedGameVersions.Length == 0
             ? "Allowing any game version"
             : $"Allowing game versions {string.Join(", ", config.AllowedGameVersions)}");
@@ -73,6 +75,7 @@ public class Program
 
         var consoleLines = StartConsoleReader();
         var console = new ConsoleCommandSender();
+        var consoleLog = LogManager.GetLogger(Logging.ConsoleLoggerName);
         logger.Info("Type \"help\" for the console commands");
 
         while (!stopping.IsCancellationRequested)
@@ -81,6 +84,7 @@ public class Program
             {
                 if (line.Trim().Length > 0)
                 {
+                    consoleLog.Info($"> {line}");
                     commands.Execute(console, line);
                 }
             }
@@ -92,6 +96,7 @@ public class Program
         logger.Info("Stopping");
         host.UnloadAll();
         Native.destroy_gameserver();
+        LogManager.Shutdown();
     }
 
     /// <summary>Reads console lines on a background thread; the main loop runs them, so commands run on the server thread.</summary>
@@ -107,34 +112,5 @@ public class Program
             }
         }) { IsBackground = true, Name = "Console" }.Start();
         return lines;
-    }
-
-    private static void InitLogging()
-    {
-        NLog.Config.LoggingConfiguration config = new NLog.Config.LoggingConfiguration();
-        var logFile = new NLog.Targets.FileTarget("logfile")
-        {
-            CreateDirs = true,
-            FileName = "logs/log.txt",
-            ArchiveOldFileOnStartup = true,
-            ArchiveEvery = NLog.Targets.FileArchivePeriod.Hour,
-            ArchiveAboveSize = 100000000,
-            EnableArchiveFileCompression = true,
-            MaxArchiveDays = 30
-        };
-        var logConsole = new NLog.Targets.ColoredConsoleTarget("logconsole")
-        {
-            EnableAnsiOutput = true, // Maybe this improves the Open Game Panel(?)
-            DetectOutputRedirected = true // Disables colors when a file is detected
-        };
-
-        #if DEBUG
-        config.AddRule(LogLevel.Trace, LogLevel.Fatal, logConsole);
-        #else
-        config.AddRule(LogLevel.Info, LogLevel.Fatal, logConsole);
-        #endif
-        config.AddRule(LogLevel.Warn, LogLevel.Fatal, logFile);
-
-        LogManager.Configuration = config;
     }
 }

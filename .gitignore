@@ -367,3 +367,6 @@ build/
 .idea/
 cmake-build-debug/
 vcpkg_installed/
+
+# Local server runs (tools/linux/run-server.sh): logs
+server/run/

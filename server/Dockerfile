@@ -36,7 +36,8 @@ WORKDIR /app
 COPY --from=base /workspace/build/src/*.so .
 COPY --from=base /workspace/build/vcpkg_installed/x64-linux/debug/lib/*.so .
 COPY --from=sdk /app .
-# Plugins go in /app/plugins/<Assembly>/, their configs in /app/config/; mount both as volumes to keep them.
+# Plugins go in /app/plugins/<Assembly>/, their configs in /app/config/, logs in /app/logs/ (one file per run plus
+# latest.log); mount them as volumes to keep them. The container user must be able to write config/ and logs/.
 # TODO: When trying to resolve libGameNetworkingSockets, ldd uses system locations and libCyberM.Server.Native's RPATH (/workspace/build/vcpkg_installed/x64-linux/)
 # but the .so is actually in the PWD, so we set the LD_LIBRARY_PATH (that was previously empty) to that. We could/should migrate to CMAKE using the correct
 # linker flags to set RPATH to "." (who cares about /workspace/build), but that probably needs OS specific defines to only run on linux

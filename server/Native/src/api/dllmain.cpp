@@ -2,6 +2,7 @@
 
 #include "message.h"
 #include "GameServer.h"
+#include "Log.h"
 
 // https://stackoverflow.com/a/2164853
 #if defined(_MSC_VER)
@@ -27,6 +28,13 @@
 // #endif
 
 
+
+/// Where native log lines go (level: 1 Debug, 2 Info, 3 Warn, 4 Error). Set it before init_gameserver to catch
+/// everything; the callback may be called from GameNetworkingSockets' thread. nullptr prints to stdout/stderr again.
+extern "C" EXPORT void server_set_log_callback(void (*cb)(int32_t, const char*))
+{
+    SetLogCallback(cb);
+}
 
 extern "C" EXPORT bool init_gameserver() {
     return GameServer::Initialize();

@@ -31,6 +31,13 @@ public static class Native
 {
     private const string LibraryName = "Cyberverse.Server.Native";
     
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    public delegate void LogCallback(int level, [MarshalAs(UnmanagedType.LPUTF8Str)] string message);
+
+    /// <summary>Where native log lines go; level 1 Debug, 2 Info, 3 Warn, 4 Error. Set before init_gameserver.</summary>
+    [DllImport(LibraryName)]
+    public static extern void server_set_log_callback([MarshalAs(UnmanagedType.FunctionPtr)] LogCallback? callback);
+
     [DllImport(LibraryName)]
     public static extern bool init_gameserver();
     

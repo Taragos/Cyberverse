@@ -4,12 +4,14 @@ add_library(${CMAKE_PROJECT_NAME} SHARED "")
 set(PROJECT_HEADER_FILES
   Main.h
         GameServer.h
+        Log.h
         api/message.h
 )
 
 set(PROJECT_SRC_FILES
   Main.cpp
         GameServer.cpp
+        Log.cpp
         api/dllmain.cpp
 )
 

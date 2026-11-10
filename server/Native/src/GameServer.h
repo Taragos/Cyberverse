@@ -7,7 +7,6 @@
 #include <steam/steamnetworkingtypes.h>
 
 // The server only moves bytes: packets are defined in shared/protocol/protocol.yaml and read and written in C#.
-// TODO: add a callback for error logging instead of printing to stderr
 class GameServer {
 private:
     HSteamListenSocket m_hListenSock = 0;

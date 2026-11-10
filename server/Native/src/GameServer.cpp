@@ -1,18 +1,28 @@
 #include "GameServer.h"
+#include "Log.h"
 
 #include <cassert>
-#include <cstdio>
 #include <steam/steamnetworkingsockets.h>
+#include <steam/isteamnetworkingutils.h>
 #include <thread>
+
+static void GameNetworkingSocketsDebugOutput(const ESteamNetworkingSocketsDebugOutputType type, const char* message)
+{
+    Log(type <= k_ESteamNetworkingSocketsDebugOutputType_Error ? LogLevel::Error : LogLevel::Warn,
+        "GameNetworkingSockets: %s", message);
+}
 
 bool GameServer::Initialize()
 {
     if (SteamDatagramErrMsg errMsg; !GameNetworkingSockets_Init(nullptr, errMsg))
     {
-        fprintf(stderr, "Could not initialize GameNetworkingSockets: %s\n", errMsg);
+        Log(LogLevel::Error, "Could not initialize GameNetworkingSockets: %s", errMsg);
         return false;
     }
 
+    // The library's own warnings and errors (bad packets, timeouts, crypto problems) into our log.
+    SteamNetworkingUtils()->SetDebugOutputFunction(k_ESteamNetworkingSocketsDebugOutputType_Warning,
+                                                   GameNetworkingSocketsDebugOutput);
     return true;
 }
 
@@ -26,7 +36,8 @@ bool GameServer::ListenOn(const uint16_t nPort)
     m_pInterface = SteamNetworkingSockets();
     if (m_pInterface == nullptr)
     {
-        fprintf(stderr, "Failed to initialize the networking library\n");
+        Log(LogLevel::Error, "Failed to initialize the networking library");
+        return false;
     }
 
     // Start listening
@@ -44,19 +55,18 @@ bool GameServer::ListenOn(const uint16_t nPort)
     m_hListenSock = m_pInterface->CreateListenSocketIP(serverLocalAddr, 1, &opt);
     if (m_hListenSock == k_HSteamListenSocket_Invalid)
     {
-        fprintf(stderr, "Failed to listen on port %d\n", nPort);
+        Log(LogLevel::Error, "Failed to listen on port %d", nPort);
         return false;
     }
 
     m_hPollGroup = m_pInterface->CreatePollGroup();
     if (m_hPollGroup == k_HSteamNetPollGroup_Invalid)
     {
-        fprintf(stderr, "Failed to listen on port %d\n", nPort);
+        Log(LogLevel::Error, "Failed to create the poll group");
         return false;
     }
 
-    printf("Server listening on port %d\n", nPort);
-    fflush(stdout); // stdout is fully buffered when piped (Docker, CI), which would hide this line until exit
+    Log(LogLevel::Info, "Server listening on port %d", nPort);
     return true;
 }
 
@@ -106,7 +116,7 @@ void GameServer::OnConnectionStatusChanged(const SteamNetConnectionStatusChanged
         // This must be a new connection
         //assert( m_mapClients.find( pInfo->m_hConn ) == m_mapClients.end() );
 
-        printf("Connection request from %s\n", pInfo->m_info.m_szConnectionDescription);
+        Log(LogLevel::Info, "Connection request from %s", pInfo->m_info.m_szConnectionDescription);
 
         // A client is attempting to connect
         // Try to accept the connection.
@@ -116,7 +126,7 @@ void GameServer::OnConnectionStatusChanged(const SteamNetConnectionStatusChanged
             // disconnected, the connection may already be half closed.  Just
             // destroy whatever we have on our side.
             m_pInterface->CloseConnection( pInfo->m_hConn, 0, nullptr, false );
-            printf( "Can't accept connection.  (It was already closed?)\n" );
+            Log(LogLevel::Warn, "Can't accept connection %s (it was already closed?)", pInfo->m_info.m_szConnectionDescription);
             break;
         }
 
@@ -124,7 +134,7 @@ void GameServer::OnConnectionStatusChanged(const SteamNetConnectionStatusChanged
         if (!m_pInterface->SetConnectionPollGroup(pInfo->m_hConn, m_hPollGroup))
         {
             m_pInterface->CloseConnection( pInfo->m_hConn, 0, nullptr, false );
-            printf( "Failed to set poll group?\n" );
+            Log(LogLevel::Warn, "Failed to set the poll group of connection %s", pInfo->m_info.m_szConnectionDescription);
             break;
         }
 
@@ -170,7 +180,7 @@ bool GameServer::SendRaw(const uint32_t connectionId, const uint8_t* data, const
         return true;
     }
 
-    fprintf(stderr, "GameServer::SendRaw(connection %u, %u bytes) => Error %d\n", connectionId, size, result);
+    Log(LogLevel::Warn, "Sending %u bytes to connection %u failed: EResult %d", size, connectionId, result);
     return false;
 }
 
@@ -189,7 +199,7 @@ void GameServer::PollIncomingMessages()
 
         if (numMsgs < 0)
         {
-            fprintf(stderr, "Error polling messages: %d\n", numMsgs);
+            Log(LogLevel::Error, "Error polling messages: %d", numMsgs);
             return;
         }
 

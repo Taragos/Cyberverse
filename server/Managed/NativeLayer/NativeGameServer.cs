@@ -11,6 +11,7 @@ public class NativeGameServer
     {
         if (!_hadSuccessfulNativeInit)
         {
+            NativeLog.Install();
             if (!Native.init_gameserver())
             {
                 throw new SystemException("Failed to initialize native library");

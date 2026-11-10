@@ -58,29 +58,22 @@ extern "C" EXPORT void server_update(GameServer *server, float deltaTime)
     server->Update(deltaTime);
 }
 
-extern "C" EXPORT Message server_poll_message(const GameServer *server) {
+/// The next received message, or one with handle == nullptr if there is none. Its data stays valid until
+/// message_release(handle), which the caller must call exactly once.
+extern "C" EXPORT Message server_poll_message(GameServer *server) {
     return server->PollRecvQueue();
 }
 
-extern "C" EXPORT void message_data_release(const uintptr_t data) {
-    // technically this bypasses the message data struct destructor, but the API is there to make this a giant switch-case
-    // if ever needed to be (but I'd not see a reason a packet struct needing a destructor)
-    free(reinterpret_cast<void*>(data));
+extern "C" EXPORT void message_release(void* handle) {
+    GameServer::ReleaseMessage(handle);
 }
 
-/// Note: this may override the channelId based on the messageType.
-extern "C" EXPORT void server_enqueue_message(const GameServer *server, const Message msg)
+/// Sends a whole message (frame header and packet) as is. The data is copied, so the caller may reuse it right away.
+/// sendFlags are GameNetworkingSockets' k_nSteamNetworkingSend_* flags.
+extern "C" EXPORT bool server_send_message(const GameServer *server, const uint32_t connectionId, const uint8_t* data,
+                                           const uint32_t size, const int32_t sendFlags)
 {
-    server->EnqueueSendQueue(msg);
-}
-
-/// Utility method to allocate X bytes so they can be passed into the send queue as Message->data and we can free it
-/// _after_ sending. Otherwise, if it was a caller unmanaged memory, we would have to copy it as we should expect
-/// it's lifetime to not surpass the call to server_enqueue_message. But since we provide a way to allocate it into
-/// our native heap, we can control the lifetime of the passed data.
-extern "C" EXPORT uintptr_t message_data_allocate(const uint64_t size)
-{
-    return reinterpret_cast<uintptr_t>(malloc(size));
+    return server->SendRaw(connectionId, data, size, sendFlags);
 }
 
 extern "C" EXPORT void server_set_connection_state_changed_cb(GameServer *server, void (*cb)(uint32_t, uint32_t))

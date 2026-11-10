@@ -1,66 +1,30 @@
 ﻿using System.Runtime.InteropServices;
-using Cyberverse.Server.NativeLayer.Protocol.Clientbound;
-using Cyberverse.Server.NativeLayer.Protocol.Serverbound;
 
 namespace Cyberverse.Server.NativeLayer;
 
-[StructLayout(LayoutKind.Sequential, Pack = 8)]
+/// <summary>
+/// A received message exactly as it came off the network: frame header and packet, read in
+/// <see cref="Cyberverse.Server.Protocol"/>. <see cref="Data"/> points into native memory that stays valid until
+/// <see cref="Native.message_release"/> is called with <see cref="Handle"/>. Mirrors server/Native/src/api/message.h.
+/// </summary>
+[StructLayout(LayoutKind.Sequential)]
 public struct Message
 {
-    public byte channelId;
-    public ushort messageType;
-    public uint connectionId;
-    public IntPtr data;
+    public IntPtr Data;
+    public IntPtr Handle;
+    public uint Size;
+    public uint ConnectionId;
 
-    public EMessageTypeServerbound MessageTypeServerBound()
-    {
-        return (EMessageTypeServerbound)messageType;
-    }
-    
-    public void MessageTypeClientBound(EMessageTypeClientbound type)
-    {
-        messageType = (ushort)type;
-    }
+    public readonly bool IsEmpty => Handle == IntPtr.Zero;
 
-    public bool HasData()
-    {
-        return data != IntPtr.Zero;
-    }
+    public readonly unsafe ReadOnlySpan<byte> Span => new((void*)Data, (int)Size);
+}
 
-    // Call this before dropping _this_
-    public void ReleaseNative()
-    {
-        if (!HasData())
-        {
-            throw new InvalidOperationException("Cannot release non-existent data!");
-        }
-        
-        Native.message_data_release(data);
-        data = IntPtr.Zero;
-    }
-
-    public T MarshalTo<T>() where T: struct
-    {
-        if (!HasData())
-        {
-            throw new InvalidOperationException("Cannot marshal a message that holds no data (anymore)!");
-        }
-        
-        var result = Marshal.PtrToStructure<T>(data);
-        ReleaseNative();
-        return result;
-    }
-
-    public void MarshalFrom<T>(T content) where T : struct
-    {
-        if (HasData())
-        {
-            throw new InvalidOperationException("Cannot marshal into a message, that already holds data");
-        }
-
-        data = Native.message_data_allocate((ulong)Marshal.SizeOf<T>());
-        Marshal.StructureToPtr(content, data, false);
-    }
+/// <summary>GameNetworkingSockets' k_nSteamNetworkingSend_* flags.</summary>
+public static class SendFlags
+{
+    public const int Unreliable = 0;
+    public const int Reliable = 8;
 }
 
 public static class Native
@@ -81,18 +45,20 @@ public static class Native
     
     [DllImport(LibraryName)]
     public static extern void server_update(IntPtr server, float deltaTime);
-    
-    [DllImport(LibraryName)]
-    public static extern void message_data_release(IntPtr data);
 
-    [DllImport(LibraryName)]
-    public static extern IntPtr message_data_allocate(ulong size);
-    
+    /// <summary>The next received message; <see cref="Message.IsEmpty"/> when there is none.</summary>
     [DllImport(LibraryName)]
     public static extern Message server_poll_message(IntPtr server);
-    
+
+    /// <summary>Frees a polled message. Call exactly once per non-empty message.</summary>
     [DllImport(LibraryName)]
-    public static extern void server_enqueue_message(IntPtr server, Message message);
+    public static extern void message_release(IntPtr handle);
+
+    /// <summary>Sends a whole message (frame header and packet). The data is copied before this returns.</summary>
+    [DllImport(LibraryName)]
+    [return: MarshalAs(UnmanagedType.U1)]
+    public static extern unsafe bool server_send_message(IntPtr server, uint connectionId, byte* data, uint size,
+        int sendFlags);
 
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
     public delegate void ConnectionStateChangedCallback(ESteamNetworkingConnectionState state, uint connectionId);

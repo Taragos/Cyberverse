@@ -1,4 +1,4 @@
-﻿using Cyberverse.Server.NativeLayer.Protocol.Common;
+﻿using Cyberverse.Server.Protocol;
 
 namespace Cyberverse.Server.Types;
 

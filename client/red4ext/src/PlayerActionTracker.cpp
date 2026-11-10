@@ -8,7 +8,7 @@
 #include "RED4ext/Scripting/Natives/Generated/game/mounting/MountingRequest.hpp"
 #include "Utils.h"
 
-#include <serverbound/WorldPacketsServerBound.h>
+#include <Protocol.h>
 
 void PlayerActionTracker::RecordPlayerAction(RED4ext::CName actionName, RED4ext::gameinputActionType actionType,
                                              float value)
@@ -29,14 +29,14 @@ void PlayerActionTracker::RecordPlayerAction(RED4ext::CName actionName, RED4ext:
         const auto [X, Y, Z, W] = Cyberverse::Utils::Entity_GetWorldPosition(player);
 
         PlayerActionTracked tracked = {};
-        tracked.action = eACTION_JUMP;
+        tracked.action = EPlayerAction::Jump;
 
         tracked.worldTransform = {};
         tracked.worldTransform.x = X;
         tracked.worldTransform.y = Y;
         tracked.worldTransform.z = Z;
 
-        Red::GetGameSystem<NetworkGameSystem>()->EnqueueMessage(1, tracked);
+        Red::GetGameSystem<NetworkGameSystem>()->EnqueueMessage(tracked);
     }
 }
 
@@ -46,7 +46,7 @@ void PlayerActionTracker::OnShoot(RED4ext::Handle<RED4ext::gameprojectileShootEv
     player_shoot.charge = event->params.charge;
     player_shoot.startPoint = Vector3 { event->startPoint.X, event->startPoint.Y, event->startPoint.Z };
     player_shoot.itemIdWeapon = // TODO: FILL
-    Red::GetGameSystem<NetworkGameSystem>()->EnqueueMessage(0, player_shoot);
+    Red::GetGameSystem<NetworkGameSystem>()->EnqueueMessage(player_shoot);
 }
 
 void PlayerActionTracker::OnHit(RED4ext::Handle<RED4ext::GameObject> gameObject,
@@ -96,7 +96,7 @@ void PlayerActionTracker::OnMounting(RED4ext::Handle<RED4ext::game::mounting::Mo
     spawnCar.worldTransform = Vector3{X, Y, Z};
     spawnCar.yaw = Yaw;
 
-    Red::GetGameSystem<NetworkGameSystem>()->EnqueueMessage(0, spawnCar);
+    Red::GetGameSystem<NetworkGameSystem>()->EnqueueMessage(spawnCar);
 }
 
 void PlayerActionTracker::OnUnmounting(RED4ext::Handle<RED4ext::game::mounting::UnmountingEvent> event)
@@ -128,7 +128,7 @@ void PlayerActionTracker::OnUnmounting(RED4ext::Handle<RED4ext::game::mounting::
 
     // TODO: Read the networkedEntityId from the entity, so we can be precise and the server doesn't need to guess.
     const PlayerUnmountCar unmount_car = {};
-    Red::GetGameSystem<NetworkGameSystem>()->EnqueueMessage(0, unmount_car);
+    Red::GetGameSystem<NetworkGameSystem>()->EnqueueMessage(unmount_car);
 }
 
 void PlayerActionTracker::OnItemEquipped(const RED4ext::TweakDBID slot, const RED4ext::ItemID item, const bool isWeapon)
@@ -139,7 +139,7 @@ void PlayerActionTracker::OnItemEquipped(const RED4ext::TweakDBID slot, const RE
     player_equip.itemId = item.tdbid.value;
     player_equip.isWeapon = isWeapon;
     player_equip.isUnequipping = false;
-    Red::GetGameSystem<NetworkGameSystem>()->EnqueueMessage(0, player_equip);
+    Red::GetGameSystem<NetworkGameSystem>()->EnqueueMessage(player_equip);
 }
 
 void PlayerActionTracker::OnItemUnequipped(const RED4ext::TweakDBID slot, const RED4ext::ItemID item, const bool isWeapon)
@@ -150,5 +150,5 @@ void PlayerActionTracker::OnItemUnequipped(const RED4ext::TweakDBID slot, const 
     player_equip.itemId = item.tdbid.value;
     player_equip.isWeapon = isWeapon;
     player_equip.isUnequipping = true;
-    Red::GetGameSystem<NetworkGameSystem>()->EnqueueMessage(0, player_equip);
+    Red::GetGameSystem<NetworkGameSystem>()->EnqueueMessage(player_equip);
 }

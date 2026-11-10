@@ -2,23 +2,11 @@
 #include "api/message.h"
 
 #include <queue>
-#include <serverbound/AuthPacketsServerBound.h>
 
 #include <steam/isteamnetworkingsockets.h>
 #include <steam/steamnetworkingtypes.h>
 
-#define SERIALIZE_SEND_QUEUE(ENUM_VARIANT, CLASS) \
-    case ENUM_VARIANT: { EnqueueMessage(val.connectionId, val.channelId, *reinterpret_cast<CLASS*>(val.data)); } break;
-
-#define DESERIALIZE_RECV_QUEUE(ENUM_VARIANT, CLASS) \
-    case ENUM_VARIANT: { \
-        CLASS message = {}; \
-        if (zpp::bits::failure(in(message)))  { \
-            fprintf(stderr, "Faulty packet: "#CLASS"\n"); pIncomingMsg->Release(); continue; \
-        } \
-        AddToRecvQueue(frame.message_type, pIncomingMsg->m_conn, frame.channel_id, message); \
-    } break;
-
+// The server only moves bytes: packets are defined in shared/protocol/protocol.yaml and read and written in C#.
 // TODO: add a callback for error logging instead of printing to stderr
 class GameServer {
 private:
@@ -26,17 +14,14 @@ private:
     HSteamNetPollGroup m_hPollGroup = 0;
     ISteamNetworkingSockets *m_pInterface = nullptr;
 
-    std::queue<Message>* dll_recv_queue = new std::queue<Message>();
-    std::queue<Message>* dll_send_queue = new std::queue<Message>();
+    // Received messages wait here between Update and C# polling them, so they keep their order relative to the
+    // connection state callbacks that Update runs.
+    std::queue<ISteamNetworkingMessage*> m_recvQueue;
     void (*m_ConnectionStatusCallback)(uint32_t, uint32_t) = nullptr;
 
 protected:
     void PollConnectionStateChanges() const;
-    void AddToRecvQueue(uint16_t messageType, uint32 connectionId, uint8_t channelId, uintptr_t data) const;
-    template<typename T> void AddToRecvQueue(uint16_t messageType, uint32 connectionId, uint8_t channelId,
-                                const T& data) const;
     void PollIncomingMessages();
-    void ProcessSendQueue();
 public:
     static bool Initialize();
     static void Destroy();
@@ -49,13 +34,11 @@ public:
     void RunBlocking();
     void Update(float deltaTime);
 
-    [[nodiscard]] Message PollRecvQueue() const;
-    void EnqueueSendQueue(Message msg) const;
+    [[nodiscard]] Message PollRecvQueue();
+    static void ReleaseMessage(void* handle);
+    bool SendRaw(uint32_t connectionId, const uint8_t* data, uint32_t size, int32_t sendFlags) const;
     void SetConnectionStatusChangedCallback(void (*cb)(uint32_t, uint32_t));
     /* DLL API stop */
-
-    template<typename T>
-    bool EnqueueMessage(HSteamNetConnection connection, uint8_t channel_id, T frame);
 };
 
 extern GameServer *SINGLETON_GAMESERVER;

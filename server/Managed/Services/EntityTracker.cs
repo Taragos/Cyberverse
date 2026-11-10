@@ -1,4 +1,4 @@
-﻿using Cyberverse.Server.NativeLayer.Protocol.Clientbound;
+﻿using Cyberverse.Server.Protocol;
 using Cyberverse.Server.Types;
 
 namespace Cyberverse.Server.Services;
@@ -26,17 +26,17 @@ public class EntityTracker
     {
         var spawnEntity = new SpawnEntity
         {
-            networkedEntityId = entity.NetworkedEntityId,
-            recordId = entity.RecordId,
-            spawnPosition = entity.WorldTransform
+            NetworkedEntityId = entity.NetworkedEntityId,
+            RecordId = entity.RecordId,
+            SpawnPosition = entity.WorldTransform
         };
-        _server.EnqueueMessage(EMessageTypeClientbound.SpawnEntity, connectionId, 1, spawnEntity);
+        _server.EnqueueMessage(connectionId, spawnEntity);
     }
 
     private void SendDespawnPacket(ulong networkEntityId, uint connectionId)
     {
-        var destroyEntity = new DestroyEntity { networkedEntityId = networkEntityId };
-        _server.EnqueueMessage(EMessageTypeClientbound.DestroyEntity, connectionId, 1, destroyEntity);
+        var destroyEntity = new DestroyEntity { NetworkedEntityId = networkEntityId };
+        _server.EnqueueMessage(connectionId, destroyEntity);
     } 
 
     public void OnStartTrackingEntity(Player player, Entity entity)
@@ -126,13 +126,13 @@ public class EntityTracker
                 //  Though, the client should ignore updates for non existing/spawned entities.
                 var teleportEntity = new TeleportEntity
                 {
-                    networkedEntityId = entity.NetworkedEntityId,
-                    targetPosition = entity.WorldTransform,
-                    yaw = entity.Yaw
+                    NetworkedEntityId = entity.NetworkedEntityId,
+                    TargetPosition = entity.WorldTransform,
+                    Yaw = entity.Yaw
                 };
 
                 //Console.WriteLine($"[{DateTime.Now.ToLongTimeString()}] Teleporting {entity.networkedEntityId} for {player.ConnectionId}");
-                _server.EnqueueMessage(EMessageTypeClientbound.TeleportEntity, player.ConnectionId, 1, teleportEntity);
+                _server.EnqueueMessage(player.ConnectionId, teleportEntity);
             }
             else
             {

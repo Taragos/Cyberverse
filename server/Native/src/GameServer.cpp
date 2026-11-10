@@ -4,13 +4,6 @@
 #include <cstdio>
 #include <steam/steamnetworkingsockets.h>
 #include <thread>
-#include <zpp_bits.h>
-#include <serverbound/EMessageTypeServerbound.h>
-#include <serverbound/AuthPacketsServerBound.h>
-#include <serverbound/WorldPacketsServerBound.h>
-#include <clientbound/EMessageTypeClientbound.h>
-#include <clientbound/AuthPacketsClientBound.h>
-#include <clientbound/WorldPacketsClientBound.h>
 
 bool GameServer::Initialize()
 {
@@ -160,41 +153,17 @@ void GameServer::PollConnectionStateChanges() const
     }
 }
 
-template<typename T>
-bool GameServer::EnqueueMessage(HSteamNetConnection connection, uint8_t channel_id, T content)
+bool GameServer::SendRaw(const uint32_t connectionId, const uint8_t* data, const uint32_t size,
+                         const int32_t sendFlags) const
 {
-    auto frame = MessageFrame {};
-    frame.channel_id = channel_id;
-    content.FillMessageFrame(frame);
-
-    auto [data, out] = zpp::bits::data_out();
-
-    auto zpp_result = out(frame);
-    if (zpp::bits::failure(zpp_result))
-    {
-        // Failed to serialize the frame(!)
-        return false;
-    }
-
-    zpp_result = out(content);
-    if (zpp::bits::failure(zpp_result))
-    {
-        // Failed to serialize the content
-        return false;
-    }
-
-    // TODO: derive the send flags from the channel id, i.e. lookup registered channels.
-    assert(data.size() < std::numeric_limits<uint32_t>::max());
-
-    const auto result = m_pInterface->SendMessageToConnection(connection, data.data(),
-        static_cast<uint32_t>(data.size()), k_nSteamNetworkingSend_Reliable, nullptr);
-
+    // GameNetworkingSockets copies the data, so the caller's buffer is free again once this returns.
+    const auto result = m_pInterface->SendMessageToConnection(connectionId, data, size, sendFlags, nullptr);
     if (result == k_EResultOK)
     {
         return true;
     }
 
-    fprintf(stderr, "GameServer::EnqueueMessage(%d) => Error %d\n", channel_id, result);
+    fprintf(stderr, "GameServer::SendRaw(connection %u, %u bytes) => Error %d\n", connectionId, size, result);
     return false;
 }
 
@@ -217,61 +186,12 @@ void GameServer::PollIncomingMessages()
             return;
         }
 
-        auto [data, in] = zpp::bits::data_in();
-        const auto begin = (std::byte*)pIncomingMsg->GetData();
-        data.assign(begin, begin + pIncomingMsg->GetSize());
-
-        MessageFrame frame = {};
-        if (zpp::bits::failure(in(frame)))
-        {
-            fprintf(stderr, "Faulty packet\n");
-            pIncomingMsg->Release();
-            continue;
-        }
-
-        // TODO: This should both be more generic probably _AND_ we need to consider how we want to hand this off to C#,
-        // given that they may want to control _all_ packet logic. This however depends on how flexible and moddable we
-        // want our, e.g. auth handling, to be.
-        // Another problem is that we have to deserialize the packets anyway, we could use macros for that at least,
-        // but it still requires native changes to add a new packet type. Especially for packets that aren't represented
-        // like that on the CSharp side (e.g. strings)
-        switch (frame.message_type)
-        {
-            case EINIT_AUTH:
-            {
-                auto init_auth = InitAuthServerBound();
-                if (zpp::bits::failure(in(init_auth)))
-                {
-                    fprintf(stderr, "Faulty packet: InitAuthServerBound\n");
-                    pIncomingMsg->Release();
-                    continue;
-                }
-
-                // extra pain due to C# ABI
-                auto init_auth_abi = new InitAuthServerBoundCSharp(init_auth);
-                AddToRecvQueue(frame.message_type, pIncomingMsg->m_conn, frame.channel_id, reinterpret_cast<uintptr_t>(init_auth_abi));
-            }
-            break;
-
-            DESERIALIZE_RECV_QUEUE(EPLAYER_JOIN_WORLD, PlayerJoinWorld)
-            DESERIALIZE_RECV_QUEUE(ePlayerActionTracked, PlayerActionTracked)
-            DESERIALIZE_RECV_QUEUE(ePlayerPositionUpdate, PlayerPositionUpdate)
-            DESERIALIZE_RECV_QUEUE(ePlayerSpawnCar, PlayerSpawnCar)
-            DESERIALIZE_RECV_QUEUE(ePlayerUnmountCar, PlayerUnmountCar)
-            DESERIALIZE_RECV_QUEUE(ePlayerEquipItem, PlayerEquipItem)
-            DESERIALIZE_RECV_QUEUE(ePlayerShoot, PlayerShoot)
-            default:
-                printf("Unknown Message Type: %d\n", frame.message_type);
-                break;
-        }
-
-        pIncomingMsg->Release();
+        m_recvQueue.push(pIncomingMsg);
     }
 }
 
 void GameServer::Update(float deltaTime)
 {
-    ProcessSendQueue();
     PollIncomingMessages();
     PollConnectionStateChanges();
 }
@@ -291,60 +211,22 @@ void GameServer::Destroy()
     GameNetworkingSockets_Kill();
 }
 
-Message GameServer::PollRecvQueue() const
+Message GameServer::PollRecvQueue()
 {
-    if (dll_recv_queue->empty())
+    if (m_recvQueue.empty())
     {
         return {};
     }
 
-    const auto val = dll_recv_queue->front();
-    dll_recv_queue->pop();
-    return val;
+    const auto message = m_recvQueue.front();
+    m_recvQueue.pop();
+    return Message{static_cast<const uint8_t*>(message->GetData()), message, static_cast<uint32_t>(message->GetSize()),
+                   message->m_conn};
 }
 
-template<typename T>
-void GameServer::AddToRecvQueue(const uint16_t messageType, const uint32 connectionId, const uint8_t channelId,
-                                const T& data) const
+void GameServer::ReleaseMessage(void* handle)
 {
-    // Helper template as we can only deserialize into stack based structs, and we then copy the packet into a long-lived ptr.
-    const auto buf = malloc(sizeof(T));
-    memcpy(buf, (void*)&data, sizeof(T));
-    AddToRecvQueue(messageType, connectionId, channelId, reinterpret_cast<uintptr_t>(buf));
-}
-
-void GameServer::AddToRecvQueue(const uint16_t messageType, const uint32 connectionId, const uint8_t channelId,
-                                const uintptr_t data) const
-{
-    const auto message = Message{channelId, messageType, connectionId, data};
-    dll_recv_queue->emplace(message);
-}
-
-void GameServer::EnqueueSendQueue(Message msg) const
-{
-    dll_send_queue->emplace(msg);
-}
-
-void GameServer::ProcessSendQueue()
-{
-    while (!dll_send_queue->empty())
-    {
-        const auto val = dll_send_queue->front();
-        dll_send_queue->pop();
-
-        switch (val.messageType)
-        {
-            SERIALIZE_SEND_QUEUE(EINIT_AUTH_RESULT, AuthResultClientBound)
-            SERIALIZE_SEND_QUEUE(eSpawnEntity, SpawnEntity)
-            SERIALIZE_SEND_QUEUE(eTeleportEntity, TeleportEntity)
-            SERIALIZE_SEND_QUEUE(eDestroyEntity, DestroyEntity)
-            SERIALIZE_SEND_QUEUE(eEquipItemEntity, EquipItemEntity)
-            default:
-                printf("Unknown messageType: %d\n", val.messageType);
-        }
-
-        free(reinterpret_cast<void*>(val.data));
-    }
+    static_cast<ISteamNetworkingMessage*>(handle)->Release();
 }
 
 GameServer *SINGLETON_GAMESERVER = nullptr;

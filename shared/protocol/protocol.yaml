@@ -1,0 +1,138 @@
+# The wire protocol between the game client and the server: every packet, enum and struct they exchange. This file is
+# the only definition. After editing it, regenerate both sides and commit the result:
+#
+#   dotnet run server/Tools/GenerateProtocol.cs
+#
+# It writes shared/protocol/Protocol.h (C++ structs for the client, serialized with zpp_bits) and
+# server/Managed/Protocol/Generated/Protocol.g.cs (C# structs with their reader and writer). The native server library
+# never sees packet types: it passes raw bytes between the network and C#.
+#
+# Wire format, which is what zpp_bits writes for the C++ structs: a 4 byte header (u8 channel, u16 message id, u8 zero),
+# then the fields in order, little endian, without padding. bool is 1 byte, an enum its underlying type, a struct its
+# fields, a string a u32 byte count and UTF-8 bytes, an array (T[]) a u32 element count and the elements.
+#
+# Field types: u8 u16 u32 u64 i8 i16 i32 i64 f32 f64 bool string, an enum or struct defined here, or an array of any of
+# them. A field is either `name: type` or `name: { type: ..., max: N, doc: ... }`. max applies to strings (bytes) and
+# arrays (elements); the server rejects longer ones when reading.
+#
+# Packets: id is the message id within its direction, channel the GameNetworkingSockets lane, reliable whether it is
+# resent until it arrives. The protocol version both sides compare at login is a hash of everything in this file except
+# comments and doc texts, so any other change makes old clients and servers incompatible.
+
+enums:
+  EAuthResult:
+    type: u8
+    values: [Ok, VersionMismatch, ValidationFailed]
+    doc: ValidationFailed covers everything from a wrong password to being banned.
+  EPlayerAction:
+    type: u8
+    values: [Jump, RangedAttack]
+
+structs:
+  Vector3:
+    fields:
+      - x: f32
+      - y: f32
+      - z: f32
+
+serverbound:
+  InitAuth:
+    id: 0
+    channel: 0
+    reliable: true
+    doc: The first packet of a connection. protocolVersion comes first so a server can read it whatever follows.
+    fields:
+      - protocolVersion: u32
+      - username: { type: string, max: 255, doc: UTF-8 }
+  PlayerJoinWorld:
+    id: 1
+    channel: 0
+    reliable: true
+    fields:
+      - position: Vector3
+  PlayerActionTracked:
+    id: 2
+    channel: 1
+    reliable: true
+    fields:
+      - action: EPlayerAction
+      - worldTransform: Vector3
+  PlayerPositionUpdate:
+    id: 3
+    channel: 1
+    reliable: true
+    fields:
+      - worldTransform: Vector3
+      - yaw: f32
+  PlayerSpawnCar:
+    id: 4
+    channel: 0
+    reliable: true
+    fields:
+      - worldTransform: Vector3
+      - yaw: f32
+      - recordId: { type: u64, doc: "TweakDBID: u32 CRC32 of the name, u8 name length, 3 bytes TweakDB offset" }
+  # id 5 was PlayerMountCar, which was never sent.
+  PlayerUnmountCar:
+    id: 6
+    channel: 0
+    reliable: true
+    fields: []
+  PlayerEquipItem:
+    id: 7
+    channel: 0
+    reliable: true
+    fields:
+      - slot: u64
+      - itemId: u64
+      - isWeapon: bool
+      - isUnequipping: bool
+  PlayerShoot:
+    id: 8
+    channel: 0
+    reliable: true
+    fields:
+      - itemIdWeapon: { type: u64, doc: "The weapon's TweakDBID; should become the item id." }
+      - startPoint: Vector3
+      - charge: f32
+
+clientbound:
+  InitAuthResult:
+    id: 0
+    channel: 0
+    reliable: true
+    fields:
+      - authResult: EAuthResult
+      - protocolVersion: u32
+  SpawnEntity:
+    id: 1
+    channel: 1
+    reliable: true
+    fields:
+      - networkedEntityId: u64
+      - recordId: u64
+      - spawnPosition: Vector3
+  TeleportEntity:
+    id: 2
+    channel: 1
+    reliable: true
+    fields:
+      - networkedEntityId: u64
+      - targetPosition: Vector3
+      - yaw: { type: f32, doc: "NPCs (players too) only have a yaw that can be set, not a full rotation." }
+  DestroyEntity:
+    id: 3
+    channel: 1
+    reliable: true
+    fields:
+      - networkedEntityId: u64
+  EquipItemEntity:
+    id: 4
+    channel: 0
+    reliable: true
+    fields:
+      - networkedEntityId: u64
+      - slot: u64
+      - itemId: u64
+      - isWeapon: bool
+      - isUnequipping: bool

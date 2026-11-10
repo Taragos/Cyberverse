@@ -10,10 +10,8 @@ ADD Native/vcpkg.json /workspace/vcpkg.json
 RUN vcpkg install --triplet=x64-linux
 
 ADD Native /workspace
-ADD protocol /workspace/protocol
 
 # generate and build
-RUN sed -i 's\../../shared/protocol\protocol\g' /workspace/CMakeLists.txt
 # TODO: Use CMakePresets instead.
 RUN cmake -DCMAKE_TOOLCHAIN_FILE:STRING=${VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake \
     -DCMAKE_EXPORT_COMPILE_COMMANDS:BOOL=TRUE -DCMAKE_BUILD_TYPE:STRING=Debug \

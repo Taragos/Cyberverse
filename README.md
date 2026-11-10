@@ -18,17 +18,17 @@ differently: Two c++ projects that mostly handle the network serialization and t
 handle server side logic and replicating in game.  
 Since it has different projects, people with multiple skillsets are welcome to collaborate, but please contact
 us before implementing a bigger feature so we can talk about the concepts relevant to that.
-Additionally, there's `shared\protocol` that handles the serialization objects.
+Additionally, there's `shared/protocol/protocol.yaml`, the only definition of the packets (see "Adding a packet").
 
 ### Server.Native
-This is the C++ support DLL of the game server, it really exclusively handles the lowest levels of networking,
-including serialization, which is why you (currently, sadly) need to add switch-case statements when implementing
-a new packet in protocol.
+This is the C++ support DLL of the game server. It handles the lowest level of networking only: it hands C# the raw
+bytes of every received message and sends the bytes C# wrote. It knows no packet types, so adding a packet doesn't
+touch it.
 
 ### Server.Managed
-The main logic of the game server, also needs to know about the new enum and structs for new packets. When 
-adhereing to a C-ABI, they can comfortably marshalled via P/Invoke. It will then perform high level logic, 
-bookkeeping, call potential plugins and then enqueue packets on it's own again.
+The main logic of the game server. It reads and writes packets with the code generated from the schema
+(`server/Managed/Protocol/`), performs high level logic, bookkeeping, calls potential plugins and then enqueues packets
+on its own again.
 
 ### Client.RED4extModule
 This is the C++ side in the game that handles networking and bridges between the redscript utility functions
@@ -40,6 +40,17 @@ This is the layer that is closest to the game logic, it's job is basically to li
 side changes into the game. Future use cases will also be providing a server browser and chat UI and maybe
 interfacing with custom redscript plugins, written by the related server owners (such as custom packets/payloads,
 triggering packets, callbacks on packets).
+
+## Adding a packet
+1. Add it to `shared/protocol/protocol.yaml` (direction, id, channel, reliable, fields; the file explains the format).
+2. Run `dotnet run server/Tools/GenerateProtocol.cs` (on Linux without the .NET SDK: `tools/linux/test-server.sh --generate`,
+   which also runs the tests). It writes `shared/protocol/Protocol.h` for the client and
+   `server/Managed/Protocol/Generated/Protocol.g.cs` for the server. Commit both with the schema; CI fails if they are
+   out of date.
+3. Server: `server.AddPacketHandler<MyPacket>(handler)` for serverbound packets, `server.EnqueueMessage(connectionId, packet)`
+   for clientbound ones. Client: `EnqueueMessage(packet)`, or a `case` in `NetworkGameSystem::PollIncomingMessages`.
+
+Any change to the schema changes the protocol version, so client and server have to be built from the same schema.
 
 ## Required Client dependencies
 - RED4ext

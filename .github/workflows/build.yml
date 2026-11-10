@@ -7,8 +7,8 @@ on:
 
 jobs:
   server-tests:
-    # The layout tests compare the C# protocol structs with the C++ ones as clang lays them out on the runner's
-    # platform, so run them on both platforms the server runs on. Both runner images ship clang.
+    # The wire tests compile the client's protocol header with clang and zpp_bits and compare its bytes with the C#
+    # writer's, so run them on both platforms the server runs on. Both runner images ship clang.
     strategy:
       matrix:
         os: [ ubuntu-latest, windows-latest ]
@@ -16,11 +16,13 @@ jobs:
 
     steps:
     - uses: actions/checkout@v5
-    - name: Check out zpp_bits for the layout tests
-      run: git submodule update --init --depth 1 server/Native/deps/zpp_bits
+    - name: Check out zpp_bits for the wire tests
+      run: git submodule update --init --depth 1 client/red4ext/deps/zpp_bits
     - uses: actions/setup-dotnet@v6
       with:
         dotnet-version: '10.0.x'
+    - name: Check the generated protocol files are up to date
+      run: dotnet run server/Tools/GenerateProtocol.cs -- --check
     - name: Run the server tests
       run: dotnet test server/Managed.Tests
 
@@ -31,8 +33,6 @@ jobs:
     - uses: actions/checkout@v5
       with:
         submodules: recursive
-    - name: Copying the protocol files
-      run: cp -rv shared/protocol server/protocol
     - uses: docker/setup-buildx-action@v4
     - name: Build the Docker image
       uses: docker/build-push-action@v7

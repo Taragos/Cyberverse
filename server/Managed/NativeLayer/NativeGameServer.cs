@@ -36,14 +36,25 @@ public class NativeGameServer
         Native.server_run_blocking(_nativePtr);
     }
 
-    public Message PollIncomingMessages()
+    /// <summary>The next received message. Pass every non-empty one to <see cref="ReleaseMessage"/>.</summary>
+    public Message PollIncomingMessage()
     {
         return Native.server_poll_message(_nativePtr);
     }
 
-    public void EnqueueMessage(Message message)
+    public static void ReleaseMessage(Message message)
     {
-        Native.server_enqueue_message(_nativePtr, message);
+        Native.message_release(message.Handle);
+    }
+
+    /// <summary>Sends a whole message (frame header and packet) as is.</summary>
+    public unsafe bool SendRaw(uint connectionId, ReadOnlySpan<byte> data, bool reliable)
+    {
+        fixed (byte* ptr = data)
+        {
+            return Native.server_send_message(_nativePtr, connectionId, ptr, (uint)data.Length,
+                reliable ? SendFlags.Reliable : SendFlags.Unreliable);
+        }
     }
 
     protected virtual void OnConnectionStateChange(ESteamNetworkingConnectionState state, uint connectionId)

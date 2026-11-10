@@ -12,9 +12,7 @@ repo="$(cd "$here/../.." && pwd)"
 engine="${CONTAINER:-podman}"
 
 if [[ "${1:-}" == "--image" ]]; then
-    # Same steps as the docker-server CI job: the image's build context is server/, so the protocol headers are copied in.
-    rm -rf "$repo/server/protocol"
-    cp -r "$repo/shared/protocol" "$repo/server/protocol"
+    # Same steps as the docker-server CI job.
     "$engine" build -t cyberverse-server -f "$repo/server/Dockerfile" "$repo/server"
     exit 0
 fi

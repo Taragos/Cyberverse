@@ -2,7 +2,7 @@
 #include "Main.h"
 #include "RED4ext/Scripting/Natives/Generated/Vector3.hpp"
 
-#include <MessageFrame.h>
+#include <Protocol.h>
 #include <chrono>
 
 struct InterpolationData {

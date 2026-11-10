@@ -1,7 +1,6 @@
 ﻿using Cyberverse.Server.NativeLayer;
-using Cyberverse.Server.NativeLayer.Protocol.Clientbound;
-using Cyberverse.Server.NativeLayer.Protocol.Serverbound;
 using Cyberverse.Server.PacketHandling;
+using Cyberverse.Server.Protocol;
 using Cyberverse.Server.Services;
 using NLog;
 
@@ -10,7 +9,8 @@ namespace Cyberverse.Server;
 public class GameServer: NativeGameServer
 {
     private static readonly Logger Logger = LogManager.GetCurrentClassLogger();
-    private readonly Dictionary<EMessageTypeServerbound, HandlePacket> _packetHandlers = new();
+    private readonly Dictionary<ushort, HandleRawPacket> _packetHandlers = new();
+    private readonly PacketWriter _writer = new();
 
     public readonly EntityService EntityService;
     public readonly EntityTracker EntityTracker;
@@ -22,9 +22,22 @@ public class GameServer: NativeGameServer
         EntityService = new EntityService();
     }
 
-    public void AddPacketHandler(EMessageTypeServerbound messageType, HandlePacket packetHandler)
+    /// <summary>
+    /// Calls handler for every packet of type T. A packet that fails to read (truncated, oversized, unknown enum value,
+    /// trailing bytes) is logged and dropped before it reaches the handler.
+    /// </summary>
+    public void AddPacketHandler<T>(HandlePacket<T> handler) where T : struct, IServerBoundPacket<T>
     {
-        _packetHandlers.Add(messageType, packetHandler);
+        _packetHandlers.Add(T.MessageId, (frame, connectionId, body) =>
+        {
+            if (!Packet.TryRead<T>(body, out var packet))
+            {
+                Logger.Warn($"Dropped a malformed {typeof(T).Name} ({body.Length} bytes) from connection {connectionId}");
+                return;
+            }
+
+            handler(this, (EMessageTypeServerbound)frame.MessageId, frame.Channel, connectionId, packet);
+        });
     }
 
     protected override void OnConnectionStateChange(ESteamNetworkingConnectionState state, uint connectionId)
@@ -60,63 +73,42 @@ public class GameServer: NativeGameServer
     public override void Update(float deltaTime)
     {
         base.Update(deltaTime);
-        var msg = PollIncomingMessages();
-        while (msg.HasData())
+        for (var msg = PollIncomingMessage(); !msg.IsEmpty; msg = PollIncomingMessage())
         {
-            ProcessMessage(msg);
-            msg = PollIncomingMessages();
+            try
+            {
+                ProcessMessage(msg);
+            }
+            finally
+            {
+                ReleaseMessage(msg);
+            }
         }
     }
 
-    public void EnqueueMessage<T>(EMessageTypeClientbound messageType, uint connectionId, byte channelId, T content) where T: struct
+    /// <summary>Sends a packet; its message id, channel and reliability come from the schema.</summary>
+    public bool EnqueueMessage<T>(uint connectionId, T packet) where T : struct, IClientBoundPacket<T>
     {
-        Message outputMessage = default;
-        outputMessage.MessageTypeClientBound(messageType);
-        outputMessage.channelId = channelId;
-        outputMessage.connectionId = connectionId;
-        
-        outputMessage.MarshalFrom(content);
-        EnqueueMessage(outputMessage);
+        _writer.Reset();
+        Packet.Write(_writer, packet);
+        return SendRaw(connectionId, _writer.WrittenSpan, T.Reliable);
     }
-    
-    // TODO: Move somewhere.
-    public const uint PROTOCOL_VERSION_CURRENT = 0x0;
-    
+
     protected virtual void ProcessMessage(Message message)
     {
-        var messageType = message.MessageTypeServerBound();
-        if (_packetHandlers.TryGetValue(messageType, out var handler))
+        var reader = new PacketReader(message.Span);
+        if (!MessageFrame.TryRead(ref reader, out var frame))
         {
-            // Hint: If we wanted to invoke multiple handlers, we'd really need a different approach, since
-            // TypedPacketHandler will try to marshal the message multiple times, which wouldn't work, so we kinda need
-            // to expose the API that TypedPacketHandler has, kinda as interface or something, but then we still have 
-            // the problem of structs not being objects, so type safety is questionable.
-            handler.Invoke(this, messageType, ref message);
+            Logger.Warn($"Dropped a {message.Size} byte message without a frame from connection {message.ConnectionId}");
             return;
         }
-        
-        Logger.Warn($"No message handler for type {messageType}");
-        if (message.messageType == 2)
+
+        if (_packetHandlers.TryGetValue(frame.MessageId, out var handler))
         {
-            var actionTracked = message.MarshalTo<PlayerActionTracked>();
-            // if (actionTracked.action == EPlayerAction.ActionJump)
-            // {
-            //     SpawnEntity spawnEntity = default;
-            //     spawnEntity.networkedEntityId = 0;
-            //     spawnEntity.recordId = new Random().NextSingle() > 0.5f ? "Character.Judy" : "Character.Panam";
-            //     spawnEntity.spawnPosition = actionTracked.worldTransform;
-            //     
-            //     Message outputMessage = default;
-            //     outputMessage.MessageTypeClientBound(EMessageTypeClientbound.SpawnEntity);
-            //     outputMessage.channelId = 1;
-            //     outputMessage.connectionId = message.connectionId;
-            //
-            //     outputMessage.MarshalFrom(spawnEntity);
-            //     EnqueueMessage(outputMessage);
-            // }
-            // else if (actionTracked.action == EPlayerAction.ActionRangedAttack)
-            // {
-            // }
+            handler(frame, message.ConnectionId, message.Span[MessageFrame.Size..]);
+            return;
         }
+
+        Logger.Warn($"No message handler for type {(EMessageTypeServerbound)frame.MessageId}");
     }
 }

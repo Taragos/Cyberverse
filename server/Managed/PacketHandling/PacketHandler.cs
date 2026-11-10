@@ -1,17 +1,9 @@
-﻿using Cyberverse.Server.NativeLayer;
-using Cyberverse.Server.NativeLayer.Protocol.Serverbound;
+﻿using Cyberverse.Server.Protocol;
 
 namespace Cyberverse.Server.PacketHandling;
 
-public delegate void HandlePacket(GameServer server, EMessageTypeServerbound messageType, ref Message message);
-
-public delegate void HandlePacketTyped<T>(GameServer server, EMessageTypeServerbound messageType, byte channelId,
+public delegate void HandlePacket<in T>(GameServer server, EMessageTypeServerbound messageType, byte channelId,
     uint connectionId, T content) where T : struct;
 
-public class TypedPacketHandler<T>(HandlePacketTyped<T> handler) where T : struct
-{
-    public void HandlePacket(GameServer server, EMessageTypeServerbound messageType, ref Message message)
-    {
-        handler(server, messageType, message.channelId, message.connectionId, message.MarshalTo<T>());
-    }
-}
+/// <summary>A registered handler before its packet is read: frame, sender and the packet's bytes after the frame.</summary>
+public delegate void HandleRawPacket(MessageFrame frame, uint connectionId, ReadOnlySpan<byte> body);

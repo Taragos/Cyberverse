@@ -14,12 +14,10 @@
 #include "RED4ext/Scripting/Natives/entEntityID.hpp"
 
 #include <RedLib.hpp>
-#include <clientbound/WorldPacketsClientBound.h>
+#include <Protocol.h>
 #include <map>
 #include <steam/isteamnetworkingsockets.h>
 #include <steam/steamnetworkingtypes.h>
-
-#include <serverbound/WorldPacketsServerBound.h>
 
 class NetworkGameSystem : public Red::IGameSystem
 {
@@ -62,8 +60,9 @@ public:
         m_hasEnqueuedLoadLastCheckpoint = true;
     }
 
+    /// Sends a packet from shared/protocol/Protocol.h; its channel and reliability come from the schema.
     template<typename T>
-    bool EnqueueMessage(uint8_t channel_id, T frame);
+    bool EnqueueMessage(const T& packet);
 
     /// Called from the plugin load and unload events
     static bool Load();
@@ -84,10 +83,10 @@ RTTI_DEFINE_CLASS(NetworkGameSystem, {
 // EnqueueMessage is defined in NetworkGameSystem.cpp, so the packet types sent from other files are instantiated there
 // (see the end of EnqueueMessage) and only declared here. Add a line in both places when another file sends a new packet.
 // TODO: Think about the concept of having EnqueueMessage public; maybe inline it instead.
-extern template bool NetworkGameSystem::EnqueueMessage(uint8_t channel_id, PlayerActionTracked msg);
-extern template bool NetworkGameSystem::EnqueueMessage(uint8_t channel_id, PlayerSpawnCar msg);
-extern template bool NetworkGameSystem::EnqueueMessage(uint8_t channel_id, PlayerUnmountCar msg);
-extern template bool NetworkGameSystem::EnqueueMessage(uint8_t channel_id, PlayerEquipItem msg);
-extern template bool NetworkGameSystem::EnqueueMessage(uint8_t channel_id, PlayerShoot msg);
+extern template bool NetworkGameSystem::EnqueueMessage(const PlayerActionTracked& packet);
+extern template bool NetworkGameSystem::EnqueueMessage(const PlayerSpawnCar& packet);
+extern template bool NetworkGameSystem::EnqueueMessage(const PlayerUnmountCar& packet);
+extern template bool NetworkGameSystem::EnqueueMessage(const PlayerEquipItem& packet);
+extern template bool NetworkGameSystem::EnqueueMessage(const PlayerShoot& packet);
 
 #endif //NETWORKMANAGERCONTROLLER_H

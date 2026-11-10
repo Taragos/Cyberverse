@@ -16,6 +16,7 @@ public class GameServer : NativeGameServer, IConnections
     private readonly PacketDispatcher _packets;
     private readonly IEventBus _events;
     private readonly ServerThread _thread;
+    private readonly ConnectionCleanup _cleanup;
 
     public readonly EntityService EntityService;
     public readonly EntityTracker EntityTracker;
@@ -29,7 +30,8 @@ public class GameServer : NativeGameServer, IConnections
         _events = events;
         PlayerService = players;
         EntityService = entities;
-        EntityTracker = new EntityTracker(this);
+        EntityTracker = new EntityTracker(this, players, entities);
+        _cleanup = new ConnectionCleanup(players, entities, EntityTracker, events);
     }
 
     protected override void OnConnectionStateChange(ESteamNetworkingConnectionState state, uint connectionId)
@@ -60,31 +62,7 @@ public class GameServer : NativeGameServer, IConnections
         return closed;
     }
 
-    /// <summary>Removes the connection's player (if it logged in) and every entity it owns.</summary>
-    private void CleanUpConnection(uint connectionId)
-    {
-        if (PlayerService.ConnectedPlayers.TryGetValue(connectionId, out var player))
-        {
-            Logger.Info($"Player {player.Name} disconnected");
-            _events.Publish(new PlayerLeft(player));
-        }
-
-        // Also without a player: the login gate keeps such connections from spawning anything, but nothing may leak.
-        var playerEntities = EntityService.SpawnedEntities
-            .Select(x => x.Value)
-            .Where(x => x.NetworkIdOwner == connectionId)
-            .ToList();
-
-        foreach (var playerEntity in playerEntities)
-        {
-            EntityTracker.StopTrackingOf(playerEntity);
-            EntityService.RemoveEntity(playerEntity.NetworkedEntityId);
-            EntityService.SpawnedEntities.Remove(playerEntity.NetworkedEntityId);
-        }
-
-        PlayerService.ConnectedPlayers.Remove(connectionId);
-        _events.Publish(new ConnectionClosed(connectionId));
-    }
+    private void CleanUpConnection(uint connectionId) => _cleanup.CleanUp(connectionId);
 
     public override void Update(float deltaTime)
     {

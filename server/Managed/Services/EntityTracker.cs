@@ -1,4 +1,5 @@
-﻿using Cyberverse.Server.Protocol;
+﻿using Cyberverse.Server.Networking;
+using Cyberverse.Server.Protocol;
 using Cyberverse.Server.Types;
 
 namespace Cyberverse.Server.Services;
@@ -8,13 +9,17 @@ public class EntityTracker
 {
     public delegate bool EntityVisibilityFilter(Player player, Entity entity);
 
-    private readonly GameServer _server;
+    private readonly IConnections _connections;
+    private readonly PlayerService _players;
+    private readonly EntityService _entities;
     private readonly Dictionary<uint, List<ulong>> _trackedEntities = new();
     private EntityVisibilityFilter? _visibilityFilter = null;
 
-    public EntityTracker(GameServer server)
+    public EntityTracker(IConnections connections, PlayerService players, EntityService entities)
     {
-        _server = server;
+        _connections = connections;
+        _players = players;
+        _entities = entities;
     }
 
     public void SetEntityVisibilityFilter(EntityVisibilityFilter? filter)
@@ -30,13 +35,13 @@ public class EntityTracker
             RecordId = entity.RecordId,
             SpawnPosition = entity.WorldTransform
         };
-        _server.Send(connectionId, spawnEntity);
+        _connections.Send(connectionId, spawnEntity);
     }
 
     private void SendDespawnPacket(ulong networkEntityId, uint connectionId)
     {
         var destroyEntity = new DestroyEntity { NetworkedEntityId = networkEntityId };
-        _server.Send(connectionId, destroyEntity);
+        _connections.Send(connectionId, destroyEntity);
     } 
 
     public void OnStartTrackingEntity(Player player, Entity entity)
@@ -78,7 +83,7 @@ public class EntityTracker
 
     public void UpdateTrackingOf(Entity entity)
     {
-        foreach (var (connectionId, player) in _server.PlayerService.ConnectedPlayers)
+        foreach (var (connectionId, player) in _players.ConnectedPlayers)
         {
             // Don't track your own entities.
             if (entity.NetworkIdOwner == connectionId)
@@ -99,7 +104,7 @@ public class EntityTracker
 
     public void StopTrackingOf(Entity entity)
     {
-        foreach (var (connectionId, player) in _server.PlayerService.ConnectedPlayers)
+        foreach (var (connectionId, player) in _players.ConnectedPlayers)
         {
             OnStopTrackingEntity(player, entity);
         }
@@ -110,7 +115,7 @@ public class EntityTracker
         // TODO: Challenge: Find the entity the player _currently_ wants to control. There could be multiple (e.g. in the car)
         // TODO: here, it's even more dumb, as we need to find out the camera at some point
         var playerEntities =
-            _server.EntityService.SpawnedEntities.Values.Where(tty => tty.NetworkIdOwner == player.ConnectionId);
+            _entities.SpawnedEntities.Values.Where(tty => tty.NetworkIdOwner == player.ConnectionId);
         foreach (var playerEntity in playerEntities)
         {
             // TODO: Check for out of bounds.
@@ -132,7 +137,7 @@ public class EntityTracker
                 };
 
                 //Console.WriteLine($"[{DateTime.Now.ToLongTimeString()}] Teleporting {entity.networkedEntityId} for {player.ConnectionId}");
-                _server.Send(player.ConnectionId, teleportEntity);
+                _connections.Send(player.ConnectionId, teleportEntity);
             }
             else
             {
@@ -148,7 +153,7 @@ public class EntityTracker
     /// <param name="player">The player to start tracking for</param>
     public void InitialSpawnForPlayer(Player player)
     {
-        foreach (var (id, tty) in _server.EntityService.SpawnedEntities)
+        foreach (var (id, tty) in _entities.SpawnedEntities)
         {
             if (tty.NetworkIdOwner != player.ConnectionId)
             {

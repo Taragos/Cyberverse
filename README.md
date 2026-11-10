@@ -6,7 +6,7 @@
 > pieces before we can start to recommend using CyberVerse to play on.
 
 ## What is Cyberverse exactly?
-Cyberverse is a very much in progress implementation of a multiplayer into Cyberpunk 2077 v2.1.  
+Cyberverse is a very much in progress implementation of a multiplayer into Cyberpunk 2077 v2.5 (see "Required Client dependencies").  
 It being a "framework" additionally means that the server side is flexibly extended by Plugins that provide additional behavior. As such, it will be a good choice for Roleplaying Servers.
 
 Besides being extendable, it also features a working sandbox mode, that already handles most of the hard topics
@@ -62,17 +62,26 @@ same release, and its game version is allowed. Otherwise the server sends a mess
   `dev` and meet each other. Tag releases as `vX.Y.Z`. The Docker build has no `.git`; pass
   `--build-arg CYBERVERSE_VERSION=$(git describe --tags --always --dirty --match "v[0-9]*")`.
 - **Game version:** `server.json` in the server's working directory, or the environment variable
-  `CYBERVERSE_ALLOWED_GAME_VERSIONS=2.31,2.3.1`. `"2.31"` allows every 2.31.x; an empty list allows any.
+  `CYBERVERSE_ALLOWED_GAME_VERSIONS=2.5,2.31`. `"2.5"` allows every 2.5.x; an empty list allows any. The client sends
+  the game's product version as RED4ext reports it, e.g. `2.5.0` for patch 2.5.
   ```json
-  { "allowedGameVersions": ["2.31"] }
+  { "allowedGameVersions": ["2.5"] }
   ```
 - **Login packets:** `InitAuth` and `InitAuthResult` are frozen, so any old client can still read why it was rejected
   (see the top of `protocol.yaml`).
 
 ## Required Client dependencies
-- RED4ext
-- Redscript
-- Codeware
+Tested on Cyberpunk 2077 **2.5** (file version 3.0.88.46235, Steam, under Proton GE-Proton10-34) with:
+
+| Mod | Version |
+|---|---|
+| [RED4ext](https://github.com/wopss/RED4ext) | 1.31.0 |
+| [redscript](https://github.com/jac3km4/redscript) | 0.5.32 |
+| [Codeware](https://github.com/psiberx/cp2077-codeware) | 1.21.2 |
+
+The plugin only loads on the game version it was built for: `client/red4ext/src/Main.cpp` declares
+`RED4EXT_V1_RUNTIME_VERSION_LATEST` of the pinned RED4ext.SDK, and RED4ext refuses a plugin whose runtime doesn't
+match the game. After a game patch, bump `client/red4ext/deps/red4ext.sdk` (and `red-lib`) and update the mods above.
 ## Building on Linux
 Everything builds on Linux with podman (or docker, with `CONTAINER=docker`), including the Windows client plugin,
 which is cross-compiled with clang-cl, lld-link and the MSVC CRT/Windows SDK fetched by

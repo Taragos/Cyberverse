@@ -20,9 +20,14 @@ public sealed class PluginLoaderTests : IDisposable
 
     public void Dispose()
     {
-        if (Directory.Exists(_root))
+        // Windows locks a loaded assembly until its load context unloads, and plugin contexts aren't collectible (no hot
+        // reload), so the copied plugin DLLs can't be deleted while the test process runs. Leave them in the temp folder.
+        try
         {
             Directory.Delete(_root, true);
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+        {
         }
     }
 

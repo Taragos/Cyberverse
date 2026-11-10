@@ -370,3 +370,6 @@ vcpkg_installed/
 
 # Local server runs (tools/linux/run-server.sh): logs
 server/run/
+
+# Local secrets for server/deploy/compose.yaml
+server/deploy/.env

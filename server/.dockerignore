@@ -7,3 +7,5 @@ Managed/bin
 Native/build
 Api/obj
 Api/bin
+Plugins/*/obj
+Plugins/*/bin

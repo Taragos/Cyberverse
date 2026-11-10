@@ -1,0 +1,39 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    Accounts, sessions and bans in PostgreSQL; players log in with Keycloak (CYB-00008). Install it with
+      dotnet publish server/Plugins/Accounts -o <server>/plugins/Cyberverse.Plugin.Accounts
+    The server image ships it. Without it the server runs in development mode (no accounts, nothing verified).
+  -->
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <EnableDynamicLoading>true</EnableDynamicLoading>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!--
+      The server provides the API: don't copy it (or its dependencies) next to the plugin. `dotnet ef` loads the plugin
+      on its own and needs it: tools/linux/add-migration.sh builds with IncludeServerApi=true, then adds the migration.
+    -->
+    <ProjectReference Include="..\..\Api\Cyberverse.Server.Api.csproj" Private="false" ExcludeAssets="runtime"
+                      Condition="'$(IncludeServerApi)' != 'true'" />
+    <ProjectReference Include="..\..\Api\Cyberverse.Server.Api.csproj" Condition="'$(IncludeServerApi)' == 'true'" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL" Version="10.0.3" />
+    <PackageReference Include="EFCore.NamingConventions" Version="10.0.1" />
+    <!-- The newest EF Core patch; Npgsql only asks for an older one. Same version as the Design package. -->
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Relational" Version="10.0.14" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Design" Version="10.0.14" PrivateAssets="all" />
+    <PackageReference Include="Microsoft.IdentityModel.JsonWebTokens" Version="8.23.0" />
+    <PackageReference Include="Microsoft.IdentityModel.Protocols.OpenIdConnect" Version="8.23.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Cyberverse.Plugin.Accounts.Tests" />
+  </ItemGroup>
+
+</Project>

@@ -1,5 +1,6 @@
 module Cyberverse.Network.Managers
 import Codeware.*
+import Cyberverse.Characters.*
 
 public native class NetworkGameSystem extends IGameSystem {
     //public native func ConnectToServer(host: String, port: Uint16) -> Void;
@@ -10,6 +11,29 @@ public native class NetworkGameSystem extends IGameSystem {
     // The browser login link and code while the server waits for it, once; else "". Not shown on screen yet (CYB-00023).
     public native func TakeLoginPrompt() -> String;
     public native func Log(message: String) -> Void;
+
+    // Characters (CYB-00009). The last CharacterList, last played first; out of range gives "".
+    public native func GetCharacterCount() -> Int32;
+    public native func GetCharacterId(index: Int32) -> String;
+    public native func GetCharacterName(index: Int32) -> String;
+    public native func GetMaxCharacters() -> Int32;
+    // Requests to the server; false when not connected. Answered through the callbacks below.
+    public native func CreateCharacter(firstName: String, lastName: String) -> Bool;
+    public native func SelectCharacter(characterId: String) -> Bool;
+    public native func DeleteCharacter(characterId: String) -> Bool;
+
+    // Called by the plugin when the server's character packets arrive.
+    public func OnCharacterList() {
+        CharacterSelection.Get().OnList();
+    }
+
+    public func OnCharacterRequestFailed(message: String) {
+        CharacterSelection.Get().OnFailed(message);
+    }
+
+    public func OnCharacterSpawned(name: String, teleport: Bool, position: Vector4, yaw: Float) {
+        CharacterSelection.Get().OnSpawned(name, teleport, position, yaw);
+    }
     
     public func SpawnTransientEntity(entityName: TweakDBID, worldPosition: Vector4, worldOrientation: Quaternion) -> EntityID {
         let npcSpec = new DynamicEntitySpec();

@@ -36,6 +36,11 @@ private:
     // Written on a network worker thread, taken by the main menu on the UI thread.
     std::mutex m_loginRejectedMutex;
     std::string m_loginRejectedMessage;
+    // The browser login the server asked for (LoginRequired), for the main menu; guarded by m_loginRejectedMutex.
+    std::string m_loginPrompt;
+    // The server we connect to; the session token is saved per server.
+    std::string m_serverHost;
+    uint16_t m_serverPort = 0;
 
 private:
     void OnRegisterUpdates(RED4ext::UpdateRegistrar* aRegistrar) override;
@@ -44,6 +49,8 @@ private:
 private:
     bool ConnectToServer(const std::string& host, uint16_t port);
     static void ConnectionStatusChangedCallback(SteamNetConnectionStatusChangedCallback_t* pInfo);
+    /// Sends InitAuth and LoginWithSession, the latter with the token saved for this server, if any.
+    void SendLogin();
     void OnNetworkUpdate(RED4ext::FrameInfo& frame_info, RED4ext::JobQueue& job_queue);
     void InterpolatePuppets(float deltaTime);
     void SetEntityPosition(RED4ext::ent::EntityID entityId, RED4ext::Vector4 worldPosition, float yaw);
@@ -68,6 +75,10 @@ public:
     /// polls this from the UI thread, because UI calls made from the network worker threads don't draw anything.
     Red::CString TakeLoginRejectedMessage();
 
+    /// While the server waits for the player to log in in the browser: the link and code to show, once; else "". The
+    /// browser opens by itself; this is for the main menu (CYB-00023) to show them too.
+    Red::CString TakeLoginPrompt();
+
     /// Writes a line from redscript into this plugin's RED4ext log.
     void Log(const Red::CString& message);
 
@@ -87,6 +98,7 @@ private:
 RTTI_DEFINE_CLASS(NetworkGameSystem, {
     RTTI_METHOD(EnqueueLoadLastCheckpoint);
     RTTI_METHOD(TakeLoginRejectedMessage);
+    RTTI_METHOD(TakeLoginPrompt);
     RTTI_METHOD(Log);
     RTTI_PROPERTY(FullyConnected);
     RTTI_PROPERTY(playerActionTracker);

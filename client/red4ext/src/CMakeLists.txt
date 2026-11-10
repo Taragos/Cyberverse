@@ -25,6 +25,8 @@ target_link_libraries(${CMAKE_PROJECT_NAME} PRIVATE zpp_bits)
 target_link_libraries(${CMAKE_PROJECT_NAME} PRIVATE GameNetworkingSockets::shared)
 target_link_libraries(${CMAKE_PROJECT_NAME} PRIVATE RedLib)
 target_link_libraries(${CMAKE_PROJECT_NAME} PRIVATE protocol)
+# ShellExecuteW, to open the login link in the browser.
+target_link_libraries(${CMAKE_PROJECT_NAME} PRIVATE shell32)
 
 # vcpkg copies the dependencies' DLLs next to the plugin with PowerShell, which doesn't exist when cross-compiling from
 # Linux (VCPKG_APPLOCAL_DEPS is off there), so copy them with CMake instead.

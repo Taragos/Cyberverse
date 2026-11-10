@@ -24,6 +24,12 @@ if pgrep -f 'Cyberpunk2077\.exe' >/dev/null; then
     exit 1
 fi
 
+# Scripts that don't compile would reach the game folder through the hardlinks right away, and redscript then refuses
+# every script mod at the next start. CYBERVERSE_SKIP_SCRIPT_CHECK=1 skips this (e.g. without Wine).
+if [[ "${CYBERVERSE_SKIP_SCRIPT_CHECK:-}" != 1 ]]; then
+    "$repo/tools/linux/check-scripts.sh" || { echo "Not installed: the redscript module doesn't compile." >&2; exit 1; }
+fi
+
 # Drop files that the current build no longer produces (e.g. DLLs of dependencies that are now linked statically).
 for dir in "$mod/red4ext/plugins/Cyberverse" "$mod/r6/scripts/Cyberverse"; do
     [[ -d "$dir" ]] || continue

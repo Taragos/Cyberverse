@@ -92,7 +92,22 @@ Players should never enter a login code someone else gives them: whoever started
 
 Without the accounts plugin (e.g. `tools/linux/run-server.sh`), the server runs in development mode: everyone gets in
 under their Windows user name and nothing is checked. When the plugin is installed but can't start (database down),
-every login is turned away. Database migrations: `tools/linux/add-migration.sh <Name>`.
+every login is turned away. Database migrations: `tools/linux/add-migration.sh <Name> [Plugin]` (default `Accounts`).
+
+## Characters
+After the game loads the world (`PlayerJoinWorld`), the `server/Plugins/Characters` plugin (shipped in the server image,
+same database as accounts) sends the player's `CharacterList`. The player creates (`CharacterCreate`), deletes
+(`CharacterDelete`) or picks (`CharacterSelect`) a character; only then the server spawns the player's entity and sends
+`CharacterSpawned`, which moves the player to where that character was last saved. A reload (a second `PlayerJoinWorld`)
+puts the character back without the select screen.
+
+- Names are "Firstname Lastname", each part 2 to 16 letters plus `'` and `-`, unique on the server ignoring case.
+- Up to `maxCharacters` (default 3) per account, in `config/characters.json`.
+- Deleting hides a character and frees its name; `characters <account id | Firstname Lastname>` lists an account's
+  characters, deleted ones too, and `restore-character <id> [Firstname Lastname]` brings one back.
+- Positions are saved every `saveIntervalSeconds` (default 60) and when the player leaves.
+
+Without the plugin, a player spawns where their game loaded and nothing is saved.
 
 ## Server logs
 Each start writes everything the console shows, plus console commands and their replies, to its own file

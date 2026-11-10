@@ -28,6 +28,11 @@ public sealed class ConnectionCleanup(PlayerService players, EntityService entit
             entities.RemoveEntity(entity.NetworkedEntityId);
         }
 
+        if (player != null)
+        {
+            tracker.ResetFor(player);
+        }
+
         players.ConnectedPlayers.Remove(connectionId);
         events.Publish(new ConnectionClosed(connectionId));
     }

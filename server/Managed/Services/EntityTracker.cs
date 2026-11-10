@@ -147,6 +147,12 @@ public class EntityTracker
     }
 
     /// <summary>
+    /// Forgets which entities the player was sent, without despawn packets: their game dropped them (a reload) or the
+    /// connection closed.
+    /// </summary>
+    public void ResetFor(Player player) => _trackedEntities.Remove(player.ConnectionId);
+
+    /// <summary>
     /// Since the entity tracker only works incremental on moved entities, a player spawning in wouldn't see resting
     /// entities. That's why we need to initiate tracking once (and in a batch!) for new players.
     /// </summary>

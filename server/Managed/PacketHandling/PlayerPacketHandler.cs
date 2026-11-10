@@ -1,4 +1,6 @@
 ﻿using Cyberverse.Server.Events;
+using Cyberverse.Server.Networking;
+using Cyberverse.Server.Players;
 using Cyberverse.Server.Plugins;
 using Cyberverse.Server.Protocol;
 using Cyberverse.Server.Services;
@@ -9,8 +11,12 @@ using NLog;
 
 namespace Cyberverse.Server.PacketHandling;
 
-/// <summary>Built-in plugin: players joining the world, moving, spawning cars and equipping items.</summary>
-public class PlayerPacketHandler : IPlugin
+/// <summary>
+/// Built-in plugin: players joining the world, moving, spawning cars and equipping items. A player's game joining the
+/// world goes to the <see cref="ICharacterProvider"/> (the characters plugin), which picks the character and spawns it
+/// through <see cref="IWorldService"/>. Without a provider the player spawns right away where their game loaded.
+/// </summary>
+public class PlayerPacketHandler : IPlugin, IWorldService
 {
     private static readonly Logger Logger = LogManager.GetCurrentClassLogger();
     private static readonly Random Random = new();
@@ -22,30 +28,134 @@ public class PlayerPacketHandler : IPlugin
     private EntityTracker? _tracker = null;
     private EntityService? _entities = null;
     private PlayerService? _players = null;
+    private IConnections? _connections = null;
     private IEventBus? _events = null;
+    private ICharacterProvider? _provider = null;
+    private readonly Dictionary<uint, InWorld> _inWorld = new();
+
+    /// <summary>A player whose game joined the world.</summary>
+    private sealed class InWorld
+    {
+        /// <summary>Where the game loaded, from the last PlayerJoinWorld.</summary>
+        public Vector3 GamePosition;
+
+        public ulong? EntityId;
+        public CharacterSpawn? Character;
+
+        /// <summary>The player was sent every entity near them since their game last loaded.</summary>
+        public bool Synced;
+    }
 
     public PluginInfo Info { get; } = new("player-sync", BuildInfo.ModVersion, "auth");
 
+    public void ConfigureServices(IServiceCollection services) => services.AddSingleton<IWorldService>(this);
+
     protected void HandleJoinWorld(uint connectionId, PlayerJoinWorld content)
     {
-        if (_players!.ConnectedPlayers.TryGetValue(connectionId, out var player))
+        if (!_players!.ConnectedPlayers.TryGetValue(connectionId, out var player))
         {
-            Logger.Trace("Player {0} joined the world at ({1}, {2}, {3})", player.Name, 
-                content.Position.X, content.Position.Y, content.Position.Z);
+            Logger.Warn($"Could not find player with id {connectionId} in the player list.");
+            return;
+        }
 
-            var choice = Random.Next(PossiblePlayerNpcChoice.Length);
-            var entity = _entities!.CreateEntity(PossiblePlayerNpcChoice[choice]);
-            entity.WorldTransform = content.Position; // Spawn the entity at the right spot already
-            entity.NetworkIdOwner = player.ConnectionId;
-                
-            // Since we only call the tracking for moved entities, force sync every entity to that player:
-            _tracker!.InitialSpawnForPlayer(player);
-            _events!.Publish(new PlayerJoinedWorld(player, content.Position));
+        Logger.Trace("Player {0} joined the world at ({1}, {2}, {3})", player.Name,
+            content.Position.X, content.Position.Y, content.Position.Z);
+
+        if (!_inWorld.TryGetValue(connectionId, out var state))
+        {
+            state = new InWorld();
+            _inWorld.Add(connectionId, state);
         }
         else
         {
-            Logger.Warn($"Could not find player with id {connectionId} in the player list.");
+            // A reload (e.g. after dying): the game dropped every puppet it had spawned for us, so send them again.
+            Logger.Debug($"{player.Name} joined the world again (connection {connectionId})");
+            _tracker!.ResetFor(player);
+            state.Synced = false;
         }
+
+        state.GamePosition = content.Position;
+
+        if (_provider == null)
+        {
+            Spawn(connectionId, state.Character ?? new CharacterSpawn("dev:" + player.Name, player.Name ?? "", null, 0, ""));
+            return;
+        }
+
+        try
+        {
+            _provider.PlayerJoinedGame(player, content.Position);
+        }
+        catch (Exception e)
+        {
+            Logger.Error(e, $"The character provider threw for {player.Name} (connection {connectionId})");
+        }
+    }
+
+    public bool Spawn(uint connectionId, CharacterSpawn character)
+    {
+        ArgumentNullException.ThrowIfNull(character);
+        if (!_players!.ConnectedPlayers.TryGetValue(connectionId, out var player) ||
+            !_inWorld.TryGetValue(connectionId, out var state))
+        {
+            return false;
+        }
+
+        // One character entity per player: a respawn or a second join replaces it.
+        if (state.EntityId is { } oldId && _entities!.SpawnedEntities.TryGetValue(oldId, out var old))
+        {
+            _tracker!.StopTrackingOf(old);
+            _entities.RemoveEntity(oldId);
+        }
+
+        var position = character.Position ?? state.GamePosition;
+        var choice = Random.Next(PossiblePlayerNpcChoice.Length);
+        var entity = _entities!.CreateEntity(PossiblePlayerNpcChoice[choice]);
+        entity.WorldTransform = position; // Spawn the entity at the right spot already
+        entity.Yaw = character.Yaw;
+        entity.NetworkIdOwner = connectionId;
+        state.EntityId = entity.NetworkedEntityId;
+        state.Character = character;
+
+        _connections!.Send(connectionId, new CharacterSpawned
+        {
+            CharacterId = character.CharacterId,
+            Name = character.Name,
+            Teleport = character.Position != null,
+            Position = position,
+            Yaw = character.Yaw,
+            Appearance = character.Appearance,
+        });
+
+        if (!state.Synced)
+        {
+            // Since we only call the tracking for moved entities, force sync every entity to that player:
+            _tracker!.InitialSpawnForPlayer(player);
+            state.Synced = true;
+        }
+
+        _tracker!.UpdateTrackingOf(entity);
+        Logger.Info($"{player.Name} plays {character.Name} (connection {connectionId})");
+        _events!.Publish(new PlayerJoinedWorld(player, position));
+        return true;
+    }
+
+    public CharacterSpawn? CharacterOf(uint connectionId) =>
+        _inWorld.TryGetValue(connectionId, out var state) ? state.Character : null;
+
+    public bool TryGetTransform(uint connectionId, out Vector3 position, out float yaw)
+    {
+        if (_inWorld.TryGetValue(connectionId, out var state) && state.EntityId is { } id &&
+            _entities!.SpawnedEntities.TryGetValue(id, out var entity))
+        {
+            position = entity.WorldTransform;
+            yaw = entity.Yaw;
+            return true;
+        }
+
+        position = default;
+        yaw = 0;
+        return false;
     }
 
     protected void HandlePositionUpdate(uint connectionId, PlayerPositionUpdate content)
@@ -180,7 +290,16 @@ public class PlayerPacketHandler : IPlugin
         _tracker = context.Services.GetRequiredService<EntityTracker>();
         _entities = context.Services.GetRequiredService<EntityService>();
         _players = context.Services.GetRequiredService<PlayerService>();
+        _connections = context.Services.GetRequiredService<IConnections>();
         _events = context.Events;
+        _provider = context.Services.GetService<ICharacterProvider>();
+        if (_provider == null)
+        {
+            Logger.Warn("No character provider (characters plugin): players spawn where their game loaded");
+        }
+
+        // PlayerLeft comes before the cleanup, so the providers can still read the transform.
+        context.Events.Subscribe<ConnectionClosed>(e => _inWorld.Remove(e.ConnectionId));
 
         context.Packets.Register<PlayerJoinWorld>(HandleJoinWorld);
         context.Packets.Register<PlayerPositionUpdate>(HandlePositionUpdate);

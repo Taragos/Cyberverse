@@ -31,6 +31,11 @@ jobs:
       run: dotnet test server/Plugins/Accounts.Tests
       env:
         CYBERVERSE_REQUIRE_CONTAINERS: ${{ runner.os == 'Linux' && '1' || '0' }}
+    - name: Run the characters plugin tests
+      # PostgreSQL in a container, as above.
+      run: dotnet test server/Plugins/Characters.Tests
+      env:
+        CYBERVERSE_REQUIRE_CONTAINERS: ${{ runner.os == 'Linux' && '1' || '0' }}
 
   docker-server:
     runs-on: ubuntu-latest

@@ -9,7 +9,7 @@
 #include <vector>
 
 /// A hash of protocol.yaml. The client sends it at login; the server rejects a different one.
-constexpr uint32_t PROTOCOL_VERSION_CURRENT = 0xD94C8427;
+constexpr uint32_t PROTOCOL_VERSION_CURRENT = 0x26B8A6AD;
 
 /// The 4 bytes in front of every packet. zpp_bits writes the struct, then the packet's fields.
 struct MessageFrame
@@ -30,6 +30,10 @@ enum class EMessageTypeServerbound : uint16_t
     PlayerEquipItem = 7,
     PlayerShoot = 8,
     LoginWithSession = 9,
+    CharacterCreate = 10,
+    CharacterSelect = 11,
+    CharacterDelete = 12,
+    CharacterAppearance = 13,
 };
 
 enum class EMessageTypeClientbound : uint16_t
@@ -41,6 +45,9 @@ enum class EMessageTypeClientbound : uint16_t
     EquipItemEntity = 4,
     LoginRequired = 5,
     SessionIssued = 6,
+    CharacterList = 7,
+    CharacterRequestFailed = 8,
+    CharacterSpawned = 9,
 };
 
 /// ValidationFailed covers everything from a wrong password to being banned. Part of the frozen InitAuthResult.
@@ -62,6 +69,17 @@ struct Vector3
     float x{};
     float y{};
     float z{};
+};
+
+/// One entry of the character select screen.
+struct CharacterInfo
+{
+    /// A GUID. At most 36 bytes.
+    std::string characterId{};
+    /// "Firstname Lastname". At most 160 bytes.
+    std::string name{};
+    /// Seconds since 1970 (UTC) of the last time it was played; 0 for never.
+    int64_t lastPlayedUnix{};
 };
 
 // serverbound packets
@@ -221,6 +239,78 @@ struct LoginWithSession
     }
 };
 
+/// Creates a character from the select screen. The server answers with CharacterList or CharacterRequestFailed.
+struct CharacterCreate
+{
+    /// 2 to 16 letters, ' and -. At most 64 bytes.
+    std::string firstName{};
+    /// 2 to 16 letters, ' and -. At most 64 bytes.
+    std::string lastName{};
+    /// The character creator's options as the client encodes them; may be empty. At most 16384 bytes.
+    std::string appearance{};
+
+    static constexpr EMessageTypeServerbound MessageType = EMessageTypeServerbound::CharacterCreate;
+    static constexpr uint8_t Channel = 0;
+    static constexpr bool Reliable = true;
+
+    static void FillMessageFrame(MessageFrame& frame)
+    {
+        frame.channel_id = Channel;
+        frame.message_type = static_cast<uint16_t>(MessageType);
+    }
+};
+
+/// Plays as this character. The server answers with CharacterSpawned or CharacterRequestFailed.
+struct CharacterSelect
+{
+    /// At most 36 bytes.
+    std::string characterId{};
+
+    static constexpr EMessageTypeServerbound MessageType = EMessageTypeServerbound::CharacterSelect;
+    static constexpr uint8_t Channel = 0;
+    static constexpr bool Reliable = true;
+
+    static void FillMessageFrame(MessageFrame& frame)
+    {
+        frame.channel_id = Channel;
+        frame.message_type = static_cast<uint16_t>(MessageType);
+    }
+};
+
+/// Deletes one of the player's characters (an admin can restore it). Answered with CharacterList or CharacterRequestFailed.
+struct CharacterDelete
+{
+    /// At most 36 bytes.
+    std::string characterId{};
+
+    static constexpr EMessageTypeServerbound MessageType = EMessageTypeServerbound::CharacterDelete;
+    static constexpr uint8_t Channel = 0;
+    static constexpr bool Reliable = true;
+
+    static void FillMessageFrame(MessageFrame& frame)
+    {
+        frame.channel_id = Channel;
+        frame.message_type = static_cast<uint16_t>(MessageType);
+    }
+};
+
+/// The appearance of the character being played changed, e.g. at a mirror. Saved; no answer.
+struct CharacterAppearance
+{
+    /// At most 16384 bytes.
+    std::string appearance{};
+
+    static constexpr EMessageTypeServerbound MessageType = EMessageTypeServerbound::CharacterAppearance;
+    static constexpr uint8_t Channel = 0;
+    static constexpr bool Reliable = true;
+
+    static void FillMessageFrame(MessageFrame& frame)
+    {
+        frame.channel_id = Channel;
+        frame.message_type = static_cast<uint16_t>(MessageType);
+    }
+};
+
 // clientbound packets
 
 /// The answer to InitAuth. Frozen, see the top of this file. After any result but Ok the server closes the connection.
@@ -340,6 +430,67 @@ struct SessionIssued
     std::string sessionToken{};
 
     static constexpr EMessageTypeClientbound MessageType = EMessageTypeClientbound::SessionIssued;
+    static constexpr uint8_t Channel = 0;
+    static constexpr bool Reliable = true;
+
+    static void FillMessageFrame(MessageFrame& frame)
+    {
+        frame.channel_id = Channel;
+        frame.message_type = static_cast<uint16_t>(MessageType);
+    }
+};
+
+/// The player's characters, for the select screen. Sent after PlayerJoinWorld while no character is being played, and after a create or delete.
+struct CharacterList
+{
+    /// At most 16 elements.
+    std::vector<CharacterInfo> characters{};
+    /// How many characters the account may have.
+    uint8_t maxCharacters{};
+
+    static constexpr EMessageTypeClientbound MessageType = EMessageTypeClientbound::CharacterList;
+    static constexpr uint8_t Channel = 0;
+    static constexpr bool Reliable = true;
+
+    static void FillMessageFrame(MessageFrame& frame)
+    {
+        frame.channel_id = Channel;
+        frame.message_type = static_cast<uint16_t>(MessageType);
+    }
+};
+
+/// A CharacterCreate, CharacterSelect or CharacterDelete was refused.
+struct CharacterRequestFailed
+{
+    /// Why, written for the player. At most 1024 bytes.
+    std::string message{};
+
+    static constexpr EMessageTypeClientbound MessageType = EMessageTypeClientbound::CharacterRequestFailed;
+    static constexpr uint8_t Channel = 0;
+    static constexpr bool Reliable = true;
+
+    static void FillMessageFrame(MessageFrame& frame)
+    {
+        frame.channel_id = Channel;
+        frame.message_type = static_cast<uint16_t>(MessageType);
+    }
+};
+
+/// The player now plays this character: also sent again after a repeated PlayerJoinWorld (e.g. a reload). The client moves the player to position when teleport is set and applies the appearance.
+struct CharacterSpawned
+{
+    /// At most 36 bytes.
+    std::string characterId{};
+    /// At most 160 bytes.
+    std::string name{};
+    /// False for a new character: it stays where the game loaded.
+    bool teleport{};
+    Vector3 position{};
+    float yaw{};
+    /// At most 16384 bytes.
+    std::string appearance{};
+
+    static constexpr EMessageTypeClientbound MessageType = EMessageTypeClientbound::CharacterSpawned;
     static constexpr uint8_t Channel = 0;
     static constexpr bool Reliable = true;
 

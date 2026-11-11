@@ -48,6 +48,10 @@ private:
     static bool IsPlayerRecord(uint64_t recordId);
     RED4ext::ent::EntityID SpawnNow(const SpawnEntity& packet, const std::string* look);
     void SpawnHeldEntities();
+    void DestroyNow(uint64_t networkedEntityId);
+    // Each spawned entity's spawn packet by network id, its position kept up to date by TeleportEntity: what a
+    // respawn needs (a remote V whose look changed at a mirror, CYB-00029).
+    std::map<uint64_t, SpawnEntity> m_spawned;
     std::unordered_map<uint64_t, std::string> m_looks;
     float m_remoteLookTimer = 0.0f; // seconds since TickRemoteLooks last ran
     std::map<RED4ext::ent::EntityID, InterpolationData> m_interpolationData;

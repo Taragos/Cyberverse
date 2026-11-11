@@ -412,7 +412,27 @@ RED4ext::ent::EntityID NetworkGameSystem::SpawnNow(const SpawnEntity& packet, co
     }
     SDK->logger->InfoF(PLUGIN, "Got Entity Id %llu for networkId %llu", entityId.hash, packet.networkedEntityId);
     m_networkedEntitiesLookup.insert(std::make_pair(packet.networkedEntityId, entityId));
+    m_spawned[packet.networkedEntityId] = packet;
     return entityId;
+}
+
+void NetworkGameSystem::DestroyNow(const uint64_t networkedEntityId)
+{
+    const auto entityId = m_networkedEntitiesLookup[networkedEntityId];
+    if (!Red::CallVirtual(this, "DestroyTransientEntity", entityId))
+    {
+        SDK->logger->Warn(PLUGIN, "Failed to destroy entity!");
+    }
+
+    // Keyed by the network id (this erased by the game's entity id before, so a respawn of the same network
+    // id was refused as "already spawned").
+    m_networkedEntitiesLookup.erase(networkedEntityId);
+    m_spawned.erase(networkedEntityId);
+    m_interpolationData.erase(entityId);
+    m_LastTeleportCommand.erase(entityId);
+    m_remoteLocomotion.Forget(entityId);
+    std::lock_guard lock(m_looksMutex);
+    m_looks.erase(entityId.hash);
 }
 
 void NetworkGameSystem::SpawnHeldEntities()
@@ -704,6 +724,7 @@ void NetworkGameSystem::PollIncomingMessages()
                 break;
             }
 
+            m_spawned[teleport.networkedEntityId].spawnPosition = teleport.targetPosition; // a respawn goes here
             const auto entityId = m_networkedEntitiesLookup[teleport.networkedEntityId];
             const RED4ext::Vector4 worldPosition = { teleport.targetPosition.x, teleport.targetPosition.y, teleport.targetPosition.z, 1.0 };
 
@@ -773,18 +794,7 @@ void NetworkGameSystem::PollIncomingMessages()
                 continue;
             }
 
-            const auto entityId = m_networkedEntitiesLookup[destroy_entity.networkedEntityId];
-            if (!Red::CallVirtual(this, "DestroyTransientEntity", entityId))
-            {
-                SDK->logger->Warn(PLUGIN, "Failed to destroy entity!");
-            }
-
-            // Keyed by the network id (this erased by the game's entity id before, so a respawn of the same network
-            // id was refused as "already spawned").
-            m_networkedEntitiesLookup.erase(destroy_entity.networkedEntityId);
-            m_interpolationData.erase(entityId);
-            m_LastTeleportCommand.erase(entityId);
-            m_remoteLocomotion.Forget(entityId);
+            DestroyNow(destroy_entity.networkedEntityId);
         }
         break;
 
@@ -810,10 +820,22 @@ void NetworkGameSystem::PollIncomingMessages()
             else if (const auto found = m_networkedEntitiesLookup.find(look.networkedEntityId);
                      found != m_networkedEntitiesLookup.end())
             {
-                // A changed look for a puppet that exists (CYB-00029: hair only changes with a respawn so far).
-                entityId = found->second;
-                std::lock_guard lock(m_looksMutex);
-                m_looks[entityId.hash] = look.appearance;
+                // A look for a V that's already there: changed at a mirror. Its hair can only be built while the
+                // engine builds the puppet, so the V is spawned again where it stands, with the new look.
+                if (look.appearance == LookOf(found->second).c_str())
+                {
+                    break; // the same look again: nothing to do
+                }
+                const auto spawned = m_spawned.find(look.networkedEntityId);
+                if (spawned == m_spawned.end())
+                {
+                    SDK->logger->WarnF(PLUGIN, "EntityLook: no spawn packet for networkId %llu", look.networkedEntityId);
+                    break;
+                }
+                const auto packet = spawned->second;
+                SDK->logger->InfoF(PLUGIN, "Look of networkId %llu changed; spawning its V again", look.networkedEntityId);
+                DestroyNow(look.networkedEntityId);
+                entityId = SpawnNow(packet, &look.appearance);
             }
             else
             {

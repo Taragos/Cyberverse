@@ -84,6 +84,7 @@ public native class NetworkGameSystem extends IGameSystem {
     }
 
     public func DestroyTransientEntity(entityId: EntityID) {
+        RemoteLookQueue.Get().Forget(entityId); // a second look pass still waiting for it would wait in vain
         GameInstance.GetDynamicEntitySystem().DeleteEntity(entityId);
     }
 

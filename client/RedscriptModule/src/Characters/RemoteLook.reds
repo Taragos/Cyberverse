@@ -170,6 +170,8 @@ public class RemoteLookSpawn extends ScriptableService {
 // player is still entering the world.
 public class RemoteLookQueue extends ScriptableService {
     private let m_pending: array<ref<RemoteLookApply>>;
+    // Every remote V with a look, for Reapply.
+    private let m_known: array<EntityID>;
 
     public static func Get() -> ref<RemoteLookQueue> {
         return GameInstance.GetScriptableServiceContainer()
@@ -178,6 +180,33 @@ public class RemoteLookQueue extends ScriptableService {
 
     // A look for an entity; replaces one still waiting for it.
     public func Add(id: EntityID, look: String) {
+        this.Forget(id);
+        ArrayPush(this.m_known, id);
+        ArrayPush(this.m_pending, RemoteLookApply.Create(id, look, 0));
+    }
+
+    // The local player's look changed (a mirror): the game pushes the new local look into the remote Vs as well, past
+    // their switched-off customization controllers (seen 2026-11-11, CYB-00029: B's V got A's new hair on A's screen).
+    // The second pass runs again on each of them, 1 s later so the local parts are there to hide.
+    public func Reapply() {
+        let network = GameInstance.GetNetworkGameSystem();
+        for id in this.m_known {
+            let look = network.LookOf(id);
+            if StrLen(look) > 0 {
+                this.ForgetPending(id);
+                ArrayPush(this.m_pending, RemoteLookApply.Create(id, look, 4));
+            }
+        }
+        network.Log(s"remote look: local look changed, applying \(ArraySize(this.m_known)) remote looks again");
+    }
+
+    // Drops an entity (it's being destroyed).
+    public func Forget(id: EntityID) {
+        ArrayRemove(this.m_known, id);
+        this.ForgetPending(id);
+    }
+
+    private func ForgetPending(id: EntityID) {
         let i = 0;
         while i < ArraySize(this.m_pending) {
             if this.m_pending[i].Is(id) {
@@ -186,7 +215,6 @@ public class RemoteLookQueue extends ScriptableService {
                 i += 1;
             }
         }
-        ArrayPush(this.m_pending, RemoteLookApply.Create(id, look));
     }
 
     public func Tick() {
@@ -209,11 +237,13 @@ public class RemoteLookApply {
     private let m_gives: Int32;      // how often head and arms were given
     private let m_sinceGiven: Int32; // steps since then, 0 = give now
     private let m_headSeen: Bool;
+    private let m_delay: Int32;      // steps to wait before starting
 
-    public static func Create(id: EntityID, look: String) -> ref<RemoteLookApply> {
+    public static func Create(id: EntityID, look: String, delay: Int32) -> ref<RemoteLookApply> {
         let self = new RemoteLookApply();
         self.m_id = id;
         self.m_look = look;
+        self.m_delay = delay;
         return self;
     }
 
@@ -232,6 +262,10 @@ public class RemoteLookApply {
     }
 
     public func Step() -> Bool {
+        if this.m_delay > 0 {
+            this.m_delay -= 1;
+            return false;
+        }
         let entity = GameInstance.GetDynamicEntitySystem().GetEntity(this.m_id);
         let puppet = entity as GameObject;
         if !IsDefined(puppet) {

@@ -6,6 +6,7 @@ using Cyberverse.Server.Players;
 using Cyberverse.Server.Plugins;
 using Cyberverse.Server.Protocol;
 using Cyberverse.Server.Services;
+using Cyberverse.Server.TweakDb;
 using Cyberverse.Server.TweakDb.Generated;
 using Cyberverse.Server.Types;
 using Microsoft.Extensions.DependencyInjection;
@@ -202,7 +203,7 @@ public sealed class PlayerPacketHandlerTests : IDisposable
         Assert.True(_world!.Spawn(1, new CharacterSpawn("c1", "Alex Example", Saved, 0, look)));
 
         var entity = Assert.Single(OwnedBy(1));
-        Assert.Equal((ulong)Character.TPP_Player_Cutscene_No_Impostor_Female, entity.RecordId);
+        Assert.Equal((ulong)CyberverseRecords.RemoteVFemale, entity.RecordId);
         // Bob gets the puppet and then its look; alice gets nothing about her own puppet.
         var toBob = _connections.Sent.Where(x => x.Connection == 2).Select(x => x.Packet).ToList();
         var spawnAt = toBob.FindIndex(x => x is SpawnEntity spawn && spawn.NetworkedEntityId == entity.NetworkedEntityId);
@@ -216,9 +217,18 @@ public sealed class PlayerPacketHandlerTests : IDisposable
     [Fact]
     public void AMaleOrEmptyLookSpawnsTheMaleV()
     {
-        Assert.Equal(Character.TPP_Player_Cutscene_No_Impostor_Male, PlayerPacketHandler.RecordFor("v1 body=m nose=1"));
-        Assert.Equal(Character.TPP_Player_Cutscene_No_Impostor_Male, PlayerPacketHandler.RecordFor(""));
-        Assert.Equal(Character.TPP_Player_Cutscene_No_Impostor_Female, PlayerPacketHandler.RecordFor("v1 body=f"));
+        Assert.Equal(CyberverseRecords.RemoteVMale, PlayerPacketHandler.RecordFor("v1 body=m nose=1"));
+        Assert.Equal(CyberverseRecords.RemoteVMale, PlayerPacketHandler.RecordFor(""));
+        Assert.Equal(CyberverseRecords.RemoteVFemale, PlayerPacketHandler.RecordFor("v1 body=f"));
+    }
+
+    [Fact]
+    public void RecordIdsFromNamesMatchTheGames()
+    {
+        // CyberverseRecords computes its ids from the names in client/tweaks/remote_v.yaml; this checks the scheme
+        // against an id the game itself uses (the generated enum's cutscene V).
+        Assert.Equal((ulong)Character.TPP_Player_Cutscene_No_Impostor_Male,
+            RecordIdUtils.ToRecordId("Character.TPP_Player_Cutscene_No_Impostor_Male"));
     }
 
     [Fact]

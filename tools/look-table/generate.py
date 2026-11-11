@@ -12,6 +12,10 @@ index. To show it on another player's V, each option has to become concrete chan
   after picking another hairstyle), so the client applies an option a switcher can turn on only when the look's
   switcher value does.
 
+A value's number is its position in the option's list (definitions, options, morphNames), which is what the editor's
+currIndex holds and the stored look keeps; the entries' own "index" fields often start at 1 or skip numbers (eyes_color
+starts at 1: stored 3 is the 4th entry, gradient_green, not index 3 gradient_black; seen 2026-11-11, CYB-00032).
+
 Input: WolvenKit JSON of male_cco/female_cco.inkcharcustomization, of every .app they reference, and of the head
 morph target files. Output: a tab-separated table the client plugin loads, one line per option value:
 
@@ -24,9 +28,12 @@ the part's skinning and parentTransform (another part of the same appearance, e.
     <body m|f> TAB <option> TAB <index> TAB switch TAB <option>[,<option>...]   (may be empty: turns nothing on)
     <body m|f> TAB <option> TAB <index> TAB app TAB <.app file>|<appearance name>
 
-"app" lines exist for hair (values with hh_* parts or a skeleton): the client doesn't rebuild those parts from the
-"mesh" line, it has the engine extract the game's own parts from that appearance of that file; the "mesh" line then
-only tells it which parts those are.
+"app" lines exist for hair (values with hh_* parts or a skeleton) and for every option whose .app the head or arms
+item doesn't bring (FROM_ITEMS: beard, piercings, face cyberware, body tattoos, genitals, scars, the body): the client
+doesn't rebuild those parts from the "mesh" line, it has the engine extract the game's own parts from that appearance
+of that file while the puppet is built; the "mesh" line then only tells it which parts those are.
+
+body_for_skin is not a game option: per skin_color value, the body of that skin (see BODY_FOR_SKIN).
 
 Lines starting with # are comments; the first one names the game version and the format version.
 
@@ -47,6 +54,14 @@ KINDS = {
     "entAnimatedComponent": "A",
 }
 SECTIONS = ("headCustomizationOptions", "bodyCustomizationOptions", "armsCustomizationOptions")
+# .app file categories (the name up to the first "_") whose parts reach a remote V another way: the head item brings the
+# head, eyes, eyebrows, eyelashes and teeth, the arms item the arms and nails. Every other option with its own .app gets
+# "app" lines, so the client builds its parts while the engine builds the puppet (CYB-00032: the customization
+# controllers that used to make them are gone).
+FROM_ITEMS = {"h0", "he", "heb", "hel", "ht", "n0", "a0"}
+# The synthetic option for V's body: the stored look has no body_color (the game derives it from skin_color), so the
+# table maps each skin_color value to the body of the same skin, and the client always adds this option.
+BODY_FOR_SKIN = "body_for_skin"
 
 
 def cname(value):
@@ -143,6 +158,33 @@ def everywhere(apps, cache, _index={}):
     return _index
 
 
+def skin_name(parts):
+    """The skin a value stands for: the appearance of its base head or body part (e.g. 01_ca_pale_00_warm_ivory)."""
+    for part in parts:
+        if part[1].startswith(("t0_", "MorphTargetSkinnedMesh")):
+            return part[3]
+    return None
+
+
+def body_option(options):
+    """BODY_FOR_SKIN: per skin_color value, body_color's value with the same skin, else the closest (same family, e.g.
+    02_ca_limestone for 02_ca_limestone_00_beige, which the female body lacks), else the first."""
+    skin, bodies = options.get("skin_color"), options.get("body_color")
+    if not skin or not bodies or not bodies["apps"]:
+        return None
+    by_name = {skin_name(parts): index for index, parts in bodies["values"].items() if index in bodies["apps"]}
+    values, files = {}, {}
+    for index, parts in skin["values"].items():
+        name = skin_name(parts) or ""
+        family = "_".join(name.split("_")[:3])
+        match = by_name.get(name) or by_name.get(family) or \
+            next((i for n, i in sorted(by_name.items()) if n and n.startswith(family)), None) or \
+            min(by_name.values(), key=int)
+        values[index] = bodies["values"][match]
+        files[index] = bodies["apps"][match]
+    return {"kind": "appearance", "values": values, "apps": files}
+
+
 def morph_regions(path):
     if not os.path.exists(path):
         return {}
@@ -179,29 +221,33 @@ def table(folder):
                         appearances = app_appearances(apps[base], cache)
                     values = {}
                     files = {}
-                    for definition in info.get("definitions", []):
+                    for position, definition in enumerate(info.get("definitions", [])):
                         parts = appearances.get(cname(definition.get("name")))
                         if parts:
-                            values[str(definition.get("index"))] = parts
-                            if str(depot) != "0" and any(p[0] == "A" or p[1].startswith("hh_") for p in parts):
-                                files[str(definition.get("index"))] = (depot, cname(definition.get("name")))
+                            values[str(position)] = parts
+                            if str(depot) != "0" and (base.split("_")[0] not in FROM_ITEMS or
+                                                      any(p[0] == "A" or p[1].startswith("hh_") for p in parts)):
+                                files[str(position)] = (depot, cname(definition.get("name")))
                     if values:
                         options[name] = {"kind": "appearance", "values": values, "apps": files}
                 elif kind == "gameuiSwitcherInfo":
                     values = {}
-                    for option in info.get("options", []):
+                    for position, option in enumerate(info.get("options", [])):
                         names = [cname(n) for n in option.get("names", [])]
-                        values[str(option.get("index"))] = [n for n in names if n and "fpp" not in n.lower()]
+                        values[str(position)] = [n for n in names if n and "fpp" not in n.lower()]
                     if values:
                         options[name] = {"kind": "switch", "values": values}
                 elif kind == "gameuiMorphInfo":
                     values = {}
-                    for morph in info.get("morphNames", []):
+                    for position, morph in enumerate(info.get("morphNames", [])):
                         target = cname(morph.get("morphName"))
                         if target and target != "None":
-                            values[str(morph.get("index"))] = [target, regions.get(target, cname(info.get("uiSlot")))]
+                            values[str(position)] = [target, regions.get(target, cname(info.get("uiSlot")))]
                     if values:
                         options[name] = {"kind": "morph", "values": values}
+        body_for_skin = body_option(options)
+        if body_for_skin:
+            options[BODY_FOR_SKIN] = body_for_skin
         out["bodies"][body] = options
     return out, sorted(p for p in missing_apps if p)
 

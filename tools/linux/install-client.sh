@@ -51,6 +51,18 @@ find "$build/src" -maxdepth 1 -name '*.dll' ! -name 'Cyberverse.Red4Ext.dll' -ex
 # Data files the plugin loads next to itself (the look table, CYB-00029).
 cp "$repo/client/red4ext/data/"* "$mod/red4ext/plugins/Cyberverse/"
 cp -r "$repo/client/RedscriptModule/src/." "$mod/r6/scripts/Cyberverse/"
+# Other players' V (CYB-00032): TweakXL records and the archive with their templates, built from the game files by
+# tools/remote-puppet/build.sh. Without either, the plugin spawns the game's cutscene V instead.
+mkdir -p "$mod/r6/tweaks/Cyberverse" "$mod/archive/pc/mod"
+cp "$repo/client/tweaks/"*.yaml "$mod/r6/tweaks/Cyberverse/"
+archive="$repo/client/build/archive/Cyberverse.archive"
+if [[ -f "$archive" ]]; then
+    cp "$archive" "$mod/archive/pc/mod/"
+else
+    echo "No $archive; run tools/remote-puppet/build.sh (other players' V use the fallback until then)." >&2
+fi
+game_dir="${CYBERVERSE_GAME:-/mnt/nvme/SteamLibrary/steamapps/common/Cyberpunk 2077}"
+[[ -d "$game_dir/red4ext/plugins/TweakXL" ]] || echo "TweakXL isn't installed in $game_dir; other players' V need it." >&2
 
 if [[ ! -f "$mod/meta.ini" ]]; then
     cat > "$mod/meta.ini" <<EOF

@@ -102,7 +102,7 @@ void LookParts::Preload()
             m_files.push_back(loader->LoadAsync(RED4ext::ResourcePath(file.c_str())));
         }
     }
-    SDK->logger->InfoF(PLUGIN, "Loading %zu hair files", m_files.size());
+    SDK->logger->InfoF(PLUGIN, "Loading %zu look part files", m_files.size());
 }
 
 void LookParts::Prepare(const LookData& look)

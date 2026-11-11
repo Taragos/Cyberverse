@@ -1,13 +1,16 @@
 module Cyberverse.Characters
 import Cyberverse.Network.Managers.*
 
-// Other players' V with their own look (CYB-00029). A remote player spawns as the game's cutscene V without impostor
-// (RemoteLook.Record), which has V's body but copies nothing from the local player. The plugin resolves the stored look
+// Other players' V with their own look (CYB-00029). A remote player spawns as our own record (RemoteLook.Record,
+// CYB-00032): the game's cutscene V without impostor, with V's body, minus the customization controllers that copied
+// the local player's look. Without TweakXL it falls back to the game's record (RemoteLook.FallbackRecord), whose
+// controllers the passes below still turn off. The plugin resolves the stored look
 // through the look table (NetworkGameSystem.ResolveLook) into parts (which mesh, with which appearance, bound to what)
 // and face shapes. Two passes put it on the puppet:
 //
-// - While the engine builds the puppet (RemoteLookSpawn): the look's hair is added, as the game's own parts for that
-//   hairstyle, which the plugin has the engine extract from the game's .app file (NetworkGameSystem.HairParts); and
+// - While the engine builds the puppet (RemoteLookSpawn): the look's hair, beard, piercings, body etc. are added, as
+//   the game's own parts, which the plugin has the engine extract from the game's .app files
+//   (NetworkGameSystem.HairParts, LookPart.atSpawn); and
 //   the customization controllers are turned off (they would copy the local player's look).
 // - Once the puppet is in the world (RemoteLookApply, stepped by RemoteLookQueue): V's head and arms as items (the way the game's inventory preview
 //   does it), whose face parts then land on the puppet; every part and face shape the table knows is cleared, and the
@@ -22,6 +25,7 @@ public native class LookPart {
     public native let appearance: String;
     public native let skinnedTo: String;
     public native let hangsFrom: String;
+    public native let atSpawn: Bool; // built from the game's .app while the engine builds the puppet (CYB-00032)
 }
 
 // A face shape: a morph target in one region of the head.
@@ -40,7 +44,14 @@ public native class LookChanges {
 }
 
 public abstract class RemoteLook {
+    // Our own record (client/tweaks/remote_v.yaml, CYB-00032): the cutscene V's record with our template, which has no
+    // customization controllers and walks with the NPC animation graph.
     public static func Record(body: String) -> TweakDBID {
+        return Equals(body, "f") ? t"Character.Cyberverse_Remote_V_Female" : t"Character.Cyberverse_Remote_V_Male";
+    }
+
+    // The game's cutscene V, which the plugin spawns instead when our record is missing (no TweakXL or archive).
+    public static func FallbackRecord(body: String) -> TweakDBID {
         return Equals(body, "f") ? t"Character.TPP_Player_Cutscene_No_Impostor_Female"
                                  : t"Character.TPP_Player_Cutscene_No_Impostor_Male";
     }
@@ -54,10 +65,11 @@ public abstract class RemoteLook {
         RemoteLookQueue.Get().Add(id, look);
     }
 
-    // Parts built at spawn: only the hair (hh_*) and its skeleton. Everything else comes with the head item or the
-    // template, and the second pass reuses it.
+    // Parts built at spawn: every part the table has a game .app appearance for, i.e. all but what the head and arms
+    // items bring (head, eyes, eyebrows, eyelashes, teeth, arms): hair and its skeleton, beard, piercings, face
+    // cyberware, makeup, the body and its tattoos, genitals and scars (CYB-00032). The second pass reuses the rest.
     public static func BuiltAtSpawn(part: ref<LookPart>) -> Bool {
-        return Equals(part.kind, "A") || Equals(RemoteLook.Category(part.name), "hh");
+        return part.atSpawn;
     }
 
     // Our name for a part we build, so it can't clash with a part of the template or of the local look.
@@ -118,12 +130,15 @@ public abstract class RemoteLook {
 //
 // Known defect: a mesh the game binds to the body ("root") although its vertices hang on bones of the hairstyle's
 // skeleton stays in its rest pose, e.g. the ring of the ponytail (hh_083). On the game's own characters such a mesh
-// reaches those bones; here it doesn't, whichever way the parts are made or added (see CYB-00029, 2026-11-11).
+// reaches those bones; here it doesn't, whichever way the parts are made or added (see CYB-00029, 2026-11-11), also on
+// our own template (CYB-00032; it only looked right while that puppet stood in its bind pose).
 public class RemoteLookSpawn extends ScriptableService {
     private cb func OnLoad() {
         GameInstance.GetCallbackSystem().RegisterCallback(n"Entity/Extract", this, n"OnExtract")
             .AddTarget(EntityTarget.RecordID(RemoteLook.Record("m")))
-            .AddTarget(EntityTarget.RecordID(RemoteLook.Record("f")));
+            .AddTarget(EntityTarget.RecordID(RemoteLook.Record("f")))
+            .AddTarget(EntityTarget.RecordID(RemoteLook.FallbackRecord("m")))
+            .AddTarget(EntityTarget.RecordID(RemoteLook.FallbackRecord("f")));
         GameInstance.GetCallbackSystem().RegisterCallback(n"Entity/Initialize", this, n"OnInitialize")
             .AddTarget(DynamicEntityTarget.Tag(n"RED4ext"));
     }
@@ -153,7 +168,7 @@ public class RemoteLookSpawn extends ScriptableService {
                 added += 1;
             }
         }
-        network.Log(s"remote look at build: \(added) hair parts for \(EntityID.ToHash(id))");
+        network.Log(s"remote look at build: \(added) parts for \(EntityID.ToHash(id))");
     }
 
     // Before the customization controllers ever run: they would copy the local player's look.
@@ -319,9 +334,9 @@ public class RemoteLookApply {
         }
         let skeletons = RemoteLook.Skeletons(changes);
 
-        // Clear: hide every face and makeup part the table can set (and the local look's hair, should the controllers
-        // have made any), flatten every face shape; what the look needs comes back below. The body and arm meshes
-        // (garments, t0_/a0_ parts) stay: the stored look doesn't list them, they're the same V body for everyone.
+        // Clear: hide every face and makeup part the table can set (and the local look's, should the game have pushed
+        // it in), flatten every face shape; what the look needs comes back below. Our own parts built at spawn have
+        // other names (RemoteLook.OwnName) and stay. Garments and t0_/a0_ parts stay too.
         let known: array<CName>;
         let reset = network.LookResetList(changes.body);
         for part in reset.parts {

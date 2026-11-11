@@ -4,6 +4,7 @@ using Cyberverse.Server.Players;
 using Cyberverse.Server.Plugins;
 using Cyberverse.Server.Protocol;
 using Cyberverse.Server.Services;
+using Cyberverse.Server.TweakDb;
 using Cyberverse.Server.TweakDb.Generated;
 using Cyberverse.Server.Types;
 using Microsoft.Extensions.DependencyInjection;
@@ -137,11 +138,9 @@ public class PlayerPacketHandler : IPlugin, IWorldService
         return true;
     }
 
-    /// <summary>The V record for a stored look: female when it says body=f, else male.</summary>
-    public static Character RecordFor(string appearance) =>
-        appearance.Split(' ').Contains("body=f")
-            ? Character.TPP_Player_Cutscene_No_Impostor_Female
-            : Character.TPP_Player_Cutscene_No_Impostor_Male;
+    /// <summary>The V record for a stored look: female when it says body=f, else male (CYB-00032).</summary>
+    public static TweakDbId RecordFor(string appearance) =>
+        appearance.Split(' ').Contains("body=f") ? CyberverseRecords.RemoteVFemale : CyberverseRecords.RemoteVMale;
 
     public bool ChangeLook(uint connectionId, string appearance)
     {

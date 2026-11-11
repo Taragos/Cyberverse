@@ -36,7 +36,7 @@ for dir in "$mod/red4ext/plugins/Cyberverse" "$mod/r6/scripts/Cyberverse"; do
     find "$dir" -type f | while read -r f; do
         rel="${f#$dir/}"
         case "$dir" in
-            */plugins/Cyberverse) [[ -f "$build/src/$rel" ]] || rm -v "$f" ;;
+            */plugins/Cyberverse) [[ -f "$build/src/$rel" || -f "$repo/client/red4ext/data/$rel" ]] || rm -v "$f" ;;
             */scripts/Cyberverse) [[ -f "$repo/client/RedscriptModule/src/$rel" ]] || rm -v "$f" ;;
         esac
     done
@@ -48,6 +48,8 @@ mkdir -p "$mod/red4ext/plugins/Cyberverse" "$mod/r6/scripts/Cyberverse"
 cp "$plugin" "$mod/red4ext/plugins/Cyberverse/"
 # Runtime DLLs of the dependencies (GameNetworkingSockets, protobuf, abseil, ...), which vcpkg copies next to the plugin.
 find "$build/src" -maxdepth 1 -name '*.dll' ! -name 'Cyberverse.Red4Ext.dll' -exec cp {} "$mod/red4ext/plugins/Cyberverse/" \;
+# Data files the plugin loads next to itself (the look table, CYB-00029).
+cp "$repo/client/red4ext/data/"* "$mod/red4ext/plugins/Cyberverse/"
 cp -r "$repo/client/RedscriptModule/src/." "$mod/r6/scripts/Cyberverse/"
 
 if [[ ! -f "$mod/meta.ini" ]]; then

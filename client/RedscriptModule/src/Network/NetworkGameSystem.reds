@@ -23,10 +23,31 @@ public native class NetworkGameSystem extends IGameSystem {
     public native func DeleteCharacter(characterId: String) -> Bool;
     // Stores the look of the character being played (CharacterAppearanceEditor's encoding).
     public native func SendCharacterAppearance(appearance: String) -> Bool;
+    // Other players' looks (CYB-00029, see RemoteLook.reds): the changes for a stored look, and everything the look
+    // table can change on a body ("m" or "f").
+    public native func ResolveLook(look: String) -> ref<LookChanges>;
+    public native func LookResetList(body: String) -> ref<LookChanges>;
+    // Points a mesh part the engine has set up at another file by path; false if Codeware refused.
+    public native func ChangePartResource(component: ref<IScriptable>, path: String) -> Bool;
+    // The look's hair as the game's own parts (extracted from its .app files), renamed with "cyberverse_". Only works
+    // when added while the engine builds the entity (Codeware's Entity/Initialize).
+    public native func HairParts(look: String) -> array<ref<IScriptable>>;
+    // The last look received for a spawned entity; empty if none.
+    public native func LookOf(entity: EntityID) -> String;
 
     // Called by the plugin when the server's character packets arrive.
     public func OnCharacterList() {
         CharacterSelection.Get().OnList();
+    }
+
+    // A remote player character's look arrived (CYB-00029).
+    public func OnEntityLook(entityId: EntityID, appearance: String) {
+        RemoteLook.Apply(entityId, appearance);
+    }
+
+    // Every 0.25 s while connected: steps remote looks waiting for their puppet (CYB-00029).
+    public func TickRemoteLooks() {
+        RemoteLookQueue.Get().Tick();
     }
 
     public func OnCharacterRequestFailed(message: String) {
@@ -78,7 +99,11 @@ public native class NetworkGameSystem extends IGameSystem {
         //GameInstance.GetTeleportationFacility(game).Teleport(entity as GameObject, position, worldOrientation);
     }
 
-    public func TeleportPuppet(puppet: ref<ScriptedPuppet>, position: Vector4, rotation: Float) -> ref<AICommand> {
+    public func TeleportPuppet(entity: ref<Entity>, position: Vector4, rotation: Float) -> ref<AICommand> {
+        let puppet = entity as ScriptedPuppet;
+        if !IsDefined(puppet) || !IsDefined(puppet.GetAIControllerComponent()) {
+            return null; // cars, items, or a puppet without AI: the teleportation facility moves those
+        }
         let teleportCommand = new AITeleportCommand();
         teleportCommand.position = position;
         teleportCommand.rotation = rotation;

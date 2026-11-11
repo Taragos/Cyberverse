@@ -1,0 +1,11 @@
+# Records other players' V spawn as (CYB-00032), loaded by TweakXL. Each is the game's cutscene V record with our own
+# entity template, built by tools/remote-puppet/build.sh into Cyberverse.archive: no customization controllers (they
+# copied the local player's look) and the NPC animation graph (reads the locomotion the plugin sets, so the V walks).
+# The server spawns these by name (PlayerPacketHandler.RecordFor); keep the names in step.
+Character.Cyberverse_Remote_V_Male:
+  $base: Character.TPP_Player_Cutscene_No_Impostor_Male
+  entityTemplatePath: cyberverse\characters\remote_v_ma.ent
+
+Character.Cyberverse_Remote_V_Female:
+  $base: Character.TPP_Player_Cutscene_No_Impostor_Female
+  entityTemplatePath: cyberverse\characters\remote_v_wa.ent

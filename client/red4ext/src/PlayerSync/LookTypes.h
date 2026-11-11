@@ -16,6 +16,7 @@ struct LookPart : Red::IScriptable
     Red::CString appearance;
     Red::CString skinnedTo;
     Red::CString hangsFrom;
+    bool atSpawn = false;
 
     RTTI_IMPL_TYPEINFO(Cyberverse::PlayerSync::LookPart);
     RTTI_IMPL_ALLOCATOR();
@@ -54,6 +55,7 @@ struct LookChanges : Red::IScriptable
             part->appearance = source.appearance.c_str();
             part->skinnedTo = source.skinnedTo.c_str();
             part->hangsFrom = source.hangsFrom.c_str();
+            part->atSpawn = source.atSpawn;
             changes->parts.PushBack(part);
         }
         for (const auto& source : data.morphs)
@@ -78,6 +80,7 @@ RTTI_DEFINE_CLASS(Cyberverse::PlayerSync::LookPart, {
     RTTI_PROPERTY(file);
     RTTI_PROPERTY(appearance);
     RTTI_PROPERTY(skinnedTo);
+    RTTI_PROPERTY(atSpawn);
     RTTI_PROPERTY(hangsFrom);
 });
 

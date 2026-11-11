@@ -6,6 +6,7 @@
 
 #include <windows.h>
 
+#include <algorithm>
 #include <filesystem>
 #include <fstream>
 #include <sstream>
@@ -15,6 +16,9 @@ namespace Cyberverse::PlayerSync
 {
 namespace
 {
+/// The table's synthetic option for V's body, per skin_color value (tools/look-table/generate.py, BODY_FOR_SKIN).
+constexpr const char* BodyForSkin = "body_for_skin";
+
 std::vector<std::string> Split(const std::string& text, const char separator)
 {
     std::vector<std::string> parts;
@@ -212,6 +216,13 @@ LookData LookTable::Resolve(const std::string& look)
     }
     const auto& body = result.body;
 
+    // V's body (CYB-00032): the body of the look's skin colour, 0 when the look names none.
+    if (std::ranges::none_of(options, [](const auto& option) { return option.first == BodyForSkin; }))
+    {
+        const auto skin = std::ranges::find_if(options, [](const auto& option) { return option.first == "skin_color"; });
+        options.emplace_back(BodyForSkin, skin != options.end() ? skin->second : "0");
+    }
+
     // Which options are in use: those no switcher controls, plus whatever the switchers in use turn on (switchers can
     // chain: beard=3 turns on beard3, which turns on beard_color3_0). The look keeps stale values of options its
     // switchers turned off again; those must not show.
@@ -257,9 +268,14 @@ LookData LookTable::Resolve(const std::string& look)
         const auto found = m_values.find(key);
         if (found != m_values.end())
         {
-            result.parts.insert(result.parts.end(), found->second.parts.begin(), found->second.parts.end());
+            const auto app = m_apps.find(key);
+            for (auto part : found->second.parts)
+            {
+                part.atSpawn = app != m_apps.end();
+                result.parts.push_back(std::move(part));
+            }
             result.morphs.insert(result.morphs.end(), found->second.morphs.begin(), found->second.morphs.end());
-            if (const auto app = m_apps.find(key); app != m_apps.end())
+            if (app != m_apps.end())
             {
                 result.apps.push_back(app->second);
             }

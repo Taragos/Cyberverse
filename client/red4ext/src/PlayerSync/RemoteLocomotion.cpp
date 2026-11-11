@@ -107,6 +107,10 @@ void RemoteLocomotion::Tick(Red::IScriptable* system, const float deltaTime, con
             state.jogLength = AnimationLength(system, entity.value(), {"jog_0", "run_0"});
             state.sprintLength = AnimationLength(system, entity.value(), {"sprint_0"});
             state.startLength = AnimationLength(system, entity.value(), {"idle_to_walk_0"});
+            // -1 everywhere means the puppet has none of the NPC locomotion animations (CYB-00032).
+            SDK->logger->InfoF(PLUGIN, "Remote locomotion for %llu: walk %.2f s, jog %.2f s, sprint %.2f s, start %.2f s",
+                               entityId.hash, state.walkLength, state.jogLength, state.sprintLength,
+                               state.startLength);
         }
 
         const auto target = now - state.lastTime > StaleAfter ? 0.0f : state.networkSpeed;

@@ -14,6 +14,7 @@
 #include "RED4ext/Scripting/Natives/Generated/game/TeleportationFacility.hpp"
 #include "RED4ext/Scripting/Utils.hpp"
 #include "RED4ext/SystemUpdate.hpp"
+#include "RED4ext/TweakDB.hpp"
 
 #include <steam/isteamnetworkingsockets.h>
 #include <steam/isteamnetworkingutils.h> // Required, see https://github.com/ValveSoftware/GameNetworkingSockets/issues/171^
@@ -28,6 +29,7 @@
 #include <shellapi.h> // ShellExecuteW
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <thread>
 
@@ -384,17 +386,64 @@ Red::DynArray<Red::Handle<Red::IScriptable>> NetworkGameSystem::HairParts(const 
     return Cyberverse::PlayerSync::LookParts::Get().Extract(Cyberverse::PlayerSync::LookTable::Get().Resolve(look.c_str()));
 }
 
+namespace
+{
+/// Other players' V (CYB-00032): our own records (client/tweaks/remote_v.yaml, TweakXL), each with the game's cutscene
+/// V it's made from, which is spawned instead when TweakXL or our archive is missing.
+struct RemoteVRecord
+{
+    uint64_t own;
+    uint64_t fallback;
+};
+
+const std::array<RemoteVRecord, 2>& RemoteVRecords()
+{
+    static const std::array<RemoteVRecord, 2> records = {{
+        {RED4ext::TweakDBID("Character.Cyberverse_Remote_V_Male").value,
+         RED4ext::TweakDBID("Character.TPP_Player_Cutscene_No_Impostor_Male").value},
+        {RED4ext::TweakDBID("Character.Cyberverse_Remote_V_Female").value,
+         RED4ext::TweakDBID("Character.TPP_Player_Cutscene_No_Impostor_Female").value},
+    }};
+    return records;
+}
+
+/// The record to spawn for a requested one: our remote V record when the game knows it, else its cutscene V.
+uint64_t SpawnableRecord(const uint64_t recordId)
+{
+    for (const auto& record : RemoteVRecords())
+    {
+        if (record.own != recordId)
+        {
+            continue;
+        }
+        RED4ext::Handle<RED4ext::IScriptable> found;
+        if (RED4ext::TweakDB::Get()->TryGetRecord(RED4ext::TweakDBID{recordId}, found) && found)
+        {
+            return recordId;
+        }
+        static bool warned = false;
+        if (!warned)
+        {
+            warned = true;
+            SDK->logger->Warn(PLUGIN, "No remote V record in TweakDB (is TweakXL installed, with Cyberverse's "
+                                      "r6/tweaks and archive?); other players spawn as the game's cutscene V");
+        }
+        return record.fallback;
+    }
+    return recordId;
+}
+} // namespace
+
 bool NetworkGameSystem::IsPlayerRecord(const uint64_t recordId)
 {
-    static const auto male = RED4ext::TweakDBID("Character.TPP_Player_Cutscene_No_Impostor_Male").value;
-    static const auto female = RED4ext::TweakDBID("Character.TPP_Player_Cutscene_No_Impostor_Female").value;
-    return recordId == male || recordId == female;
+    return std::ranges::any_of(RemoteVRecords(), [recordId](const RemoteVRecord& record)
+                               { return recordId == record.own || recordId == record.fallback; });
 }
 
 RED4ext::ent::EntityID NetworkGameSystem::SpawnNow(const SpawnEntity& packet, const std::string* look)
 {
     SDK->logger->InfoF(PLUGIN, "Spawning entity %llu", packet.recordId);
-    RED4ext::TweakDBID entityName = {packet.recordId};
+    RED4ext::TweakDBID entityName = {SpawnableRecord(packet.recordId)};
     RED4ext::Vector4 worldPosition = {packet.spawnPosition.x, packet.spawnPosition.y, packet.spawnPosition.z, 1.0};
     RED4ext::Quaternion worldOrientation = {0.0, 0.0, 0.0, 1.0};
 

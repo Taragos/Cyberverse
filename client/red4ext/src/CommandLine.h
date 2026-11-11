@@ -42,3 +42,10 @@ inline std::optional<std::string> ParseDumpTypesFromCommandLine(char* commandLin
     constexpr auto needleLen = std::char_traits<char>::length(needle);
     return ArgumentFromCommandLineUntilNextSpace(commandLine, needle, needleLen);
 }
+
+/// --cyberverse-profile=<name>: a separate saved login, e.g. for a second client on the same PC (CYB-00031).
+inline std::optional<std::string> ParseProfileFromCommandLine(char* commandLine) {
+    constexpr auto needle = "--cyberverse-profile=";
+    constexpr auto needleLen = std::char_traits<char>::length(needle);
+    return ArgumentFromCommandLineUntilNextSpace(commandLine, needle, needleLen);
+}

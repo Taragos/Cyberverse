@@ -6,6 +6,10 @@ set(PROJECT_HEADER_FILES
   Utils.h
   PlayerActionTracker.h
         PlayerSync/InterpolationData.h
+        PlayerSync/RemoteLocomotion.h
+        PlayerSync/LookParts.h
+        PlayerSync/LookTypes.h
+        PlayerSync/LookTable.h
         CommandLine.h
 )
 
@@ -13,6 +17,9 @@ set(PROJECT_SRC_FILES
   Main.cpp
   NetworkGameSystem.cpp
   PlayerActionTracker.cpp
+  PlayerSync/RemoteLocomotion.cpp
+  PlayerSync/LookParts.cpp
+  PlayerSync/LookTable.cpp
 )
 
 source_group(TREE "${CMAKE_CURRENT_SOURCE_DIR}" FILES ${PROJECT_HEADER_FILES} ${PROJECT_SRC_FILES})

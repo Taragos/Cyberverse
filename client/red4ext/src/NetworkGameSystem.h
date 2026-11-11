@@ -1,6 +1,7 @@
 #ifndef NETWORKMANAGERCONTROLLER_H
 #define NETWORKMANAGERCONTROLLER_H
 #include "RED4ext/Api/v1/Sdk.hpp"
+#include "RED4ext/ResourceLoader.hpp"
 #include "RED4ext/SystemUpdate.hpp"
 
 #include "RED4ext/Scripting/IScriptable.hpp"
@@ -9,6 +10,8 @@
 
 #include "PlayerActionTracker.h"
 #include "PlayerSync/InterpolationData.h"
+#include "PlayerSync/LookTypes.h"
+#include "PlayerSync/RemoteLocomotion.h"
 #include "RED4ext/Scripting/Natives/Generated/AI/Command.hpp"
 #include "RED4ext/Scripting/Natives/Generated/Vector4.hpp"
 #include "RED4ext/Scripting/Natives/entEntityID.hpp"
@@ -17,6 +20,8 @@
 #include <Protocol.h>
 #include <map>
 #include <mutex>
+#include <string>
+#include <unordered_map>
 #include <vector>
 #include <steam/isteamnetworkingsockets.h>
 #include <steam/steamnetworkingtypes.h>
@@ -31,9 +36,30 @@ private:
     Red::Handle<Red::ink::ISystemRequestsHandler> m_systemRequestsHandler;
     bool m_gameRestored = false;
     std::map<uint64_t, RED4ext::ent::EntityID> m_networkedEntitiesLookup;
+    // Remote player characters' looks by entity id hash (CYB-00029); read by LookOf while the engine builds them.
+    std::recursive_mutex m_looksMutex; // recursive: the spawn request holds it and may call back into LookOf
+    // Spawns of other players' V waiting for their look (see the SpawnEntity handler), by network id.
+    struct HeldSpawn
+    {
+        SpawnEntity packet;
+        float since; // m_clock when it arrived
+    };
+    std::map<uint64_t, HeldSpawn> m_heldSpawns;
+    static bool IsPlayerRecord(uint64_t recordId);
+    RED4ext::ent::EntityID SpawnNow(const SpawnEntity& packet, const std::string* look);
+    void SpawnHeldEntities();
+    void DestroyNow(uint64_t networkedEntityId);
+    // Each spawned entity's spawn packet by network id, its position kept up to date by TeleportEntity: what a
+    // respawn needs (a remote V whose look changed at a mirror, CYB-00029).
+    std::map<uint64_t, SpawnEntity> m_spawned;
+    std::unordered_map<uint64_t, std::string> m_looks;
+    float m_remoteLookTimer = 0.0f; // seconds since TickRemoteLooks last ran
     std::map<RED4ext::ent::EntityID, InterpolationData> m_interpolationData;
     std::map<RED4ext::ent::EntityID, RED4ext::Handle<RED4ext::AICommand>> m_LastTeleportCommand;
     float m_TimeSinceLastPlayerPositionSync;
+    // Remote puppets' walk animation (CYB-00010), and the plugin's clock in seconds.
+    Cyberverse::PlayerSync::RemoteLocomotion m_remoteLocomotion;
+    float m_clock = 0.0f;
     // Written on a network worker thread, taken by the main menu on the UI thread.
     std::mutex m_loginRejectedMutex;
     std::string m_loginRejectedMessage;
@@ -42,6 +68,8 @@ private:
     // The server we connect to; the session token is saved per server.
     std::string m_serverHost;
     uint16_t m_serverPort = 0;
+    // --cyberverse-profile: which saved login to use; empty for the default one (CYB-00031).
+    std::string m_profile;
     // The account's characters from the last CharacterList, for the select popup (CYB-00009).
     std::mutex m_charactersMutex;
     std::vector<CharacterInfo> m_characters;
@@ -100,6 +128,19 @@ public:
     bool DeleteCharacter(const Red::CString& characterId);
     /// Stores the look of the character being played (the encoded editor options). False when not connected.
     bool SendCharacterAppearance(const Red::CString& appearance);
+    // Other players' looks (CYB-00029): the changes for a stored look, and everything the table can change on a body
+    // ("m" or "f"); see PlayerSync/LookTable.h.
+    Red::Handle<Cyberverse::PlayerSync::LookChanges> ResolveLook(const Red::CString& look);
+    Red::Handle<Cyberverse::PlayerSync::LookChanges> LookResetList(const Red::CString& body);
+    // Points a mesh part at another file, by path (redscript can't build a ResRef from a string); Codeware's
+    // IComponent.ChangeResource does the work. Only for parts the engine has set up (with an owner).
+    bool ChangePartResource(const Red::Handle<Red::IScriptable>& component, const Red::CString& path);
+    // The look's hair as the game's own parts, extracted from its .app files and renamed with "cyberverse_" (see
+    // PlayerSync/LookParts.h). Only parts added while the engine builds the entity (Codeware's Entity/Initialize) get
+    // set up; later ones never render.
+    Red::DynArray<Red::Handle<Red::IScriptable>> HairParts(const Red::CString& look);
+    // The last look received for a spawned entity; empty if none. Thread-safe: read while the engine builds it.
+    Red::CString LookOf(const RED4ext::ent::EntityID& entity);
 
     /// Sends a packet from shared/protocol/Protocol.h; its channel and reliability come from the schema.
     template<typename T>
@@ -127,6 +168,11 @@ RTTI_DEFINE_CLASS(NetworkGameSystem, {
     RTTI_METHOD(SelectCharacter);
     RTTI_METHOD(DeleteCharacter);
     RTTI_METHOD(SendCharacterAppearance);
+    RTTI_METHOD(ResolveLook);
+    RTTI_METHOD(LookResetList);
+    RTTI_METHOD(ChangePartResource);
+    RTTI_METHOD(HairParts);
+    RTTI_METHOD(LookOf);
     RTTI_PROPERTY(FullyConnected);
     RTTI_PROPERTY(playerActionTracker);
     RTTI_ALIAS("Cyberverse.Network.Managers.NetworkGameSystem");

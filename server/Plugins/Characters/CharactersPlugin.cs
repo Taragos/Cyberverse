@@ -245,6 +245,7 @@ public sealed class CharactersPlugin : IPlugin, ICharacterProvider
         }
 
         session.Playing = playing with { Appearance = packet.Appearance };
+        _world?.ChangeLook(connectionId, packet.Appearance); // the other players see the new look
         Track(_store!.SaveAppearanceAsync(id, packet.Appearance, _stopping.Token),
             $"Saved the look of {playing.Name} ({packet.Appearance.Length} characters)");
     }

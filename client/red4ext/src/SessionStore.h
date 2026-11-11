@@ -1,6 +1,7 @@
 #pragma once
 // Where the client keeps the session tokens the server hands out after a browser login (CYB-00008): one file per
-// server, %LOCALAPPDATA%\Cyberverse\sessions\<host>_<port>.token. A token logs this PC in without the browser until
+// server, %LOCALAPPDATA%\Cyberverse\sessions\<host>_<port>.token, or <host>_<port>_<profile>.token with
+// --cyberverse-profile=<profile>, so two clients on one PC (one Proton prefix) can log in as two accounts (CYB-00031). A token logs this PC in without the browser until
 // it expires (30 days unused) or is revoked; deleting the file only means logging in in the browser again.
 #include <windows.h>
 
@@ -13,13 +14,17 @@
 
 namespace SessionStore
 {
-inline std::filesystem::path PathFor(const std::string& host, uint16_t port)
+inline std::filesystem::path PathFor(const std::string& host, uint16_t port, const std::string& profile = {})
 {
     wchar_t base[MAX_PATH];
     const auto length = GetEnvironmentVariableW(L"LOCALAPPDATA", base, MAX_PATH);
     const auto dir = length > 0 && length < MAX_PATH ? std::filesystem::path(base) : std::filesystem::temp_directory_path();
 
     auto name = host + "_" + std::to_string(port);
+    if (!profile.empty())
+    {
+        name += "_" + profile.substr(0, 32);
+    }
     for (auto& c : name)
     {
         if (!std::isalnum(static_cast<unsigned char>(c)) && c != '.' && c != '-')

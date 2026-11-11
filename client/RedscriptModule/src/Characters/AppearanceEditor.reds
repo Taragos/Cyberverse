@@ -16,6 +16,8 @@ import Cyberverse.Network.Managers.*
 public class AppearanceEditor extends ScriptableService {
     // An editor of ours is open or about to open.
     private let m_active: Bool;
+    // The character's look as last stored on the server; a save merges into it (see Merge).
+    private let m_stored: String;
 
     public static func Get() -> ref<AppearanceEditor> {
         return GameInstance.GetScriptableServiceContainer()
@@ -32,10 +34,12 @@ public class AppearanceEditor extends ScriptableService {
 
     private cb func OnSessionEnd(event: ref<GameSessionEvent>) {
         this.m_active = false;
+        this.m_stored = "";
     }
 
     // From CharacterSelection on Play, with the world's UI ready.
     public func Start(appearance: String) {
+        this.m_stored = appearance;
         let data = new CyberverseMorphMenuUserData();
         data.m_editMode = gameuiCharacterCustomizationEditTag.Ripperdoc;
         data.m_apply = appearance;
@@ -95,6 +99,36 @@ public class AppearanceEditor extends ScriptableService {
         for option in options {
             if IsDefined(option.info) && option.isEditable && option.currIndex != 4294967295u {
                 look += " " + NameToString(option.info.name) + "=" + ToString(option.currIndex);
+            }
+        }
+        return look;
+    }
+
+    // What a confirmed editor stores: the editor's options over the stored look. A mirror in the world lets only some
+    // options be edited (hair, makeup, ...; not skin, face shapes, cyberware, genitals) and Encode lists only editable
+    // ones, so on its own it would drop the rest from the server (seen 2026-11-11, CYB-00029). Returns the new look.
+    public func Store(edited: String) -> String {
+        let look = AppearanceEditor.Merge(this.m_stored, edited);
+        this.m_stored = look;
+        return look;
+    }
+
+    // The edited look plus every option of the stored one it doesn't name. body comes from the edited look.
+    public static func Merge(stored: String, edited: String) -> String {
+        let named: array<String>;
+        for pair in StrSplit(edited, " ") {
+            let name: String;
+            let value: String;
+            if StrSplitFirst(pair, "=", name, value) {
+                ArrayPush(named, name);
+            }
+        }
+        let look = edited;
+        for pair in StrSplit(stored, " ") {
+            let name: String;
+            let value: String;
+            if StrSplitFirst(pair, "=", name, value) && !ArrayContains(named, name) {
+                look += " " + pair;
             }
         }
         return look;
@@ -202,8 +236,10 @@ protected cb func OnInitializeOptionsList(evt: ref<gameuiCharacterCustomizationS
 @wrapMethod(characterCreationBodyMorphMenu)
 public final func ConfirmCustomizedCharacter() {
     if this.m_updatingFinalizedState && (!IsDefined(this.m_cyberverse) || this.m_cyberverse.m_show) {
-        let look = AppearanceEditor.Encode();
-        AppearanceEditor.Log("storing the look (" + ToString(StrLen(look)) + " bytes)");
+        let edited = AppearanceEditor.Encode();
+        let look = AppearanceEditor.Get().Store(edited);
+        AppearanceEditor.Log("storing the look (" + ToString(StrLen(edited)) + " bytes from the editor, "
+            + ToString(StrLen(look)) + " with the stored look)");
         GameInstance.GetNetworkGameSystem().SendCharacterAppearance(look);
     }
     wrappedMethod();
@@ -212,6 +248,7 @@ public final func ConfirmCustomizedCharacter() {
 @wrapMethod(characterCreationBodyMorphMenu)
 protected cb func OnReFinalizeComplete(evt: ref<gameuiCharacterCustomizationSystem_OnReFinalizeStateCompleteEvent>) -> Bool {
     let result = wrappedMethod(evt);
+    RemoteLookQueue.Get().Reapply(); // the new local look also reached the remote Vs
     AppearanceEditor.Get().OnFinished(true);
     return result;
 }

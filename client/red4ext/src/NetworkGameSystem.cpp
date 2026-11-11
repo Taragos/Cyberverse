@@ -2,12 +2,15 @@
 
 #include "CommandLine.h"
 #include "SessionStore.h"
+#include "PlayerSync/LookParts.h"
+#include "PlayerSync/LookTable.h"
 #include "TypeDump.h"
 #include "Main.h"
 #include "Utils.h"
 
 #include "RED4ext/RTTISystem.hpp"
 #include "RED4ext/Scripting/Natives/Generated/EulerAngles.hpp"
+#include "RED4ext/Scripting/Natives/Generated/red/ResourceReferenceScriptToken.hpp"
 #include "RED4ext/Scripting/Natives/Generated/game/TeleportationFacility.hpp"
 #include "RED4ext/Scripting/Utils.hpp"
 #include "RED4ext/SystemUpdate.hpp"
@@ -24,6 +27,8 @@
 #include <lmcons.h> // UNLEN
 #include <shellapi.h> // ShellExecuteW
 
+#include <algorithm>
+#include <cmath>
 #include <thread>
 
 bool NetworkGameSystem::Load()
@@ -147,6 +152,11 @@ void NetworkGameSystem::OnNetworkUpdate(RED4ext::FrameInfo& frame_info, RED4ext:
         const auto commandLine = GetCommandLineA();
         const auto host = ParseHostFromCommandLine(commandLine);
         const auto port = ParsePortFromCommandLine(commandLine);
+        if (const auto profile = ParseProfileFromCommandLine(commandLine); profile.has_value() && !profile->empty())
+        {
+            m_profile = profile.value();
+            SDK->logger->InfoF(PLUGIN, "Using the saved login of profile '%s'", m_profile.c_str());
+        }
         if (host.has_value() && port.has_value())
         {
             ConnectToServer(host.value(), port.value());
@@ -163,9 +173,24 @@ void NetworkGameSystem::OnNetworkUpdate(RED4ext::FrameInfo& frame_info, RED4ext:
         return;
     }
 
+    // Long before the first remote player spawns: the look table and every hair file (once).
+    Cyberverse::PlayerSync::LookParts::Get().Preload();
+
+    m_clock += frame_info.deltaTime;
     PollIncomingMessages();
+    SpawnHeldEntities();
     TrackPlayerPosition(frame_info.deltaTime);
     InterpolatePuppets(frame_info.deltaTime);
+    m_remoteLocomotion.Tick(this, frame_info.deltaTime, m_clock);
+
+    // Remote looks waiting for their puppet (RemoteLookQueue in RemoteLook.reds): stepped from here, not from the
+    // game's delay callbacks, which get lost while the local player enters the world.
+    m_remoteLookTimer += frame_info.deltaTime;
+    if (m_remoteLookTimer >= 0.25f)
+    {
+        m_remoteLookTimer = 0.0f;
+        Red::CallVirtual(this, "TickRemoteLooks");
+    }
 
     m_pInterface->RunCallbacks(); // This shall be called in a loop.
 }
@@ -218,7 +243,7 @@ void NetworkGameSystem::SendLogin()
 
     // Right behind InitAuth on the same reliable channel, so it arrives second.
     LoginWithSession login = {};
-    login.sessionToken = SessionStore::Load(SessionStore::PathFor(m_serverHost, m_serverPort));
+    login.sessionToken = SessionStore::Load(SessionStore::PathFor(m_serverHost, m_serverPort, m_profile));
     if (login.sessionToken.size() > 128)
     {
         login.sessionToken.clear(); // not one the server issued
@@ -329,6 +354,110 @@ bool NetworkGameSystem::SendCharacterAppearance(const Red::CString& appearance)
     return EnqueueMessage(request);
 }
 
+Red::Handle<Cyberverse::PlayerSync::LookChanges> NetworkGameSystem::ResolveLook(const Red::CString& look)
+{
+    auto& table = Cyberverse::PlayerSync::LookTable::Get();
+    return Cyberverse::PlayerSync::LookChanges::From(table.Resolve(look.c_str()), table.IsLoaded());
+}
+
+Red::Handle<Cyberverse::PlayerSync::LookChanges> NetworkGameSystem::LookResetList(const Red::CString& body)
+{
+    auto& table = Cyberverse::PlayerSync::LookTable::Get();
+    return Cyberverse::PlayerSync::LookChanges::From(table.ResetList(body.c_str()), table.IsLoaded());
+}
+
+bool NetworkGameSystem::ChangePartResource(const Red::Handle<Red::IScriptable>& component, const Red::CString& path)
+{
+    if (!component)
+    {
+        return false;
+    }
+    RED4ext::ResRef reference{};
+    reference.resource = RED4ext::RaRef<RED4ext::CResource>(RED4ext::ResourcePath(path.c_str()));
+    bool changed = false;
+    Red::CallVirtual(component, "ChangeResource", changed, reference, true);
+    return changed;
+}
+
+Red::DynArray<Red::Handle<Red::IScriptable>> NetworkGameSystem::HairParts(const Red::CString& look)
+{
+    return Cyberverse::PlayerSync::LookParts::Get().Extract(Cyberverse::PlayerSync::LookTable::Get().Resolve(look.c_str()));
+}
+
+bool NetworkGameSystem::IsPlayerRecord(const uint64_t recordId)
+{
+    static const auto male = RED4ext::TweakDBID("Character.TPP_Player_Cutscene_No_Impostor_Male").value;
+    static const auto female = RED4ext::TweakDBID("Character.TPP_Player_Cutscene_No_Impostor_Female").value;
+    return recordId == male || recordId == female;
+}
+
+RED4ext::ent::EntityID NetworkGameSystem::SpawnNow(const SpawnEntity& packet, const std::string* look)
+{
+    SDK->logger->InfoF(PLUGIN, "Spawning entity %llu", packet.recordId);
+    RED4ext::TweakDBID entityName = {packet.recordId};
+    RED4ext::Vector4 worldPosition = {packet.spawnPosition.x, packet.spawnPosition.y, packet.spawnPosition.z, 1.0};
+    RED4ext::Quaternion worldOrientation = {0.0, 0.0, 0.0, 1.0};
+
+    // The engine may start building the entity on another thread the moment it is requested, and the build asks for
+    // the look (LookOf, by entity id): the lock keeps it waiting until the look is stored under the new id.
+    std::lock_guard lock(m_looksMutex);
+    RED4ext::ent::EntityID entityId;
+    if (!Red::CallVirtual(this, "SpawnTransientEntity", entityId, entityName, worldPosition, worldOrientation))
+    {
+        SDK->logger->Warn(PLUGIN, "Failed to spawn entity!");
+    }
+    if (look)
+    {
+        m_looks[entityId.hash] = *look;
+    }
+    SDK->logger->InfoF(PLUGIN, "Got Entity Id %llu for networkId %llu", entityId.hash, packet.networkedEntityId);
+    m_networkedEntitiesLookup.insert(std::make_pair(packet.networkedEntityId, entityId));
+    m_spawned[packet.networkedEntityId] = packet;
+    return entityId;
+}
+
+void NetworkGameSystem::DestroyNow(const uint64_t networkedEntityId)
+{
+    const auto entityId = m_networkedEntitiesLookup[networkedEntityId];
+    if (!Red::CallVirtual(this, "DestroyTransientEntity", entityId))
+    {
+        SDK->logger->Warn(PLUGIN, "Failed to destroy entity!");
+    }
+
+    // Keyed by the network id (this erased by the game's entity id before, so a respawn of the same network
+    // id was refused as "already spawned").
+    m_networkedEntitiesLookup.erase(networkedEntityId);
+    m_spawned.erase(networkedEntityId);
+    m_interpolationData.erase(entityId);
+    m_LastTeleportCommand.erase(entityId);
+    m_remoteLocomotion.Forget(entityId);
+    std::lock_guard lock(m_looksMutex);
+    m_looks.erase(entityId.hash);
+}
+
+void NetworkGameSystem::SpawnHeldEntities()
+{
+    // A player's V whose look didn't follow its spawn within 2 s: spawn it anyway, with the default hair.
+    for (auto held = m_heldSpawns.begin(); held != m_heldSpawns.end();)
+    {
+        if (m_clock - held->second.since < 2.0f)
+        {
+            ++held;
+            continue;
+        }
+        SDK->logger->WarnF(PLUGIN, "No look for networkId %llu after 2 s; spawning without", held->first);
+        SpawnNow(held->second.packet, nullptr);
+        held = m_heldSpawns.erase(held);
+    }
+}
+
+Red::CString NetworkGameSystem::LookOf(const RED4ext::ent::EntityID& entity)
+{
+    std::lock_guard lock(m_looksMutex);
+    const auto found = m_looks.find(entity.hash);
+    return found != m_looks.end() ? Red::CString(found->second.c_str()) : Red::CString();
+}
+
 Red::CString NetworkGameSystem::TakeLoginRejectedMessage()
 {
     std::lock_guard lock(m_loginRejectedMutex);
@@ -390,6 +519,8 @@ void NetworkGameSystem::SetEntityPosition(const RED4ext::ent::EntityID entityId,
     {
         // TODO: Find out if this is an NPCPuppet...
         // AI
+        // The AI teleport command is what moves NPC puppets; TeleportationFacility.Teleport alone reports success
+        // but leaves them where they are (CYB-00010, 2026-11-10).
         RED4ext::Handle<RED4ext::AICommand> commandRef;
         Red::CallVirtual(this, "TeleportPuppet", commandRef, entity.value(), worldPosition, yaw);
         m_LastTeleportCommand[entityId] = commandRef;
@@ -531,7 +662,7 @@ void NetworkGameSystem::PollIncomingMessages()
                 continue;
             }
 
-            const auto path = SessionStore::PathFor(m_serverHost, m_serverPort);
+            const auto path = SessionStore::PathFor(m_serverHost, m_serverPort, m_profile);
             if (SessionStore::Save(path, session.sessionToken))
             {
                 SDK->logger->Info(PLUGIN, "Saved the session; the next join from this PC skips the browser");
@@ -559,22 +690,14 @@ void NetworkGameSystem::PollIncomingMessages()
                 continue;
             }
 
-            // TODO: separate spawning component
-            // TODO: SpawnTransientEntity should return the EntityId for a Map<NetworkedEntityId, LocalEntityId>, especially for further updates.
-            SDK->logger->InfoF(PLUGIN, "Spawning entity %llu", spawn_entity.recordId);
-            RED4ext::TweakDBID entityName = { spawn_entity.recordId };
-            RED4ext::Vector4 worldPosition = { spawn_entity.spawnPosition.x, spawn_entity.spawnPosition.y, spawn_entity.spawnPosition.z, 1.0 };
-            RED4ext::Quaternion worldOrientation = { 0.0, 0.0, 0.0, 1.0 };
-
-            RED4ext::ent::EntityID entityId;
-            if (!Red::CallVirtual(this, "SpawnTransientEntity", entityId, entityName, worldPosition, worldOrientation))
+            if (IsPlayerRecord(spawn_entity.recordId))
             {
-                SDK->logger->Warn(PLUGIN, "Failed to spawn entity!");
+                // Another player's V: its hair is put on while the engine builds the puppet, so the spawn waits for the
+                // look (the EntityLook packet that follows on the same channel; SpawnHeldEntities is the fallback).
+                m_heldSpawns[spawn_entity.networkedEntityId] = {spawn_entity, m_clock};
+                break;
             }
-
-            // TODO: Validation. already contained? Error!
-            SDK->logger->InfoF(PLUGIN, "Got Entity Id %llu for networkId %llu", entityId.hash, spawn_entity.networkedEntityId);
-            m_networkedEntitiesLookup.insert(std::make_pair(spawn_entity.networkedEntityId, entityId));
+            SpawnNow(spawn_entity, nullptr);
         }
         break;
 
@@ -588,6 +711,12 @@ void NetworkGameSystem::PollIncomingMessages()
                 continue;
             }
 
+            if (const auto held = m_heldSpawns.find(teleport.networkedEntityId); held != m_heldSpawns.end())
+            {
+                held->second.packet.spawnPosition = teleport.targetPosition; // spawns where it is by then
+                break;
+            }
+
             if (!m_networkedEntitiesLookup.contains(teleport.networkedEntityId))
             {
                 SDK->logger->WarnF(PLUGIN, "Entity Teleport packet for unknown networkedEntityId %llu. Map size %d",
@@ -595,6 +724,7 @@ void NetworkGameSystem::PollIncomingMessages()
                 break;
             }
 
+            m_spawned[teleport.networkedEntityId].spawnPosition = teleport.targetPosition; // a respawn goes here
             const auto entityId = m_networkedEntitiesLookup[teleport.networkedEntityId];
             const RED4ext::Vector4 worldPosition = { teleport.targetPosition.x, teleport.targetPosition.y, teleport.targetPosition.z, 1.0 };
 
@@ -633,6 +763,9 @@ void NetworkGameSystem::PollIncomingMessages()
                 Red::CallVirtual(this, "StopAICommand", entity.value(), commandRef);
             }
 
+            m_remoteLocomotion.OnNetworkPosition(
+                entityId, {teleport.targetPosition.x, teleport.targetPosition.y, teleport.targetPosition.z}, m_clock);
+
             // TODO: This should probably be a map<id, list<data>>, so that a server that eagerly sends too much data doesn't increase interpolation delay
             //  in contrast, we can just increase the time velocity of the interpolator
             const auto interpolation_data = InterpolationData(Cyberverse::Utils::Vector4To3(positionSource), teleport.targetPosition, yawSource, teleport.yaw, 0.1f);
@@ -650,19 +783,67 @@ void NetworkGameSystem::PollIncomingMessages()
                 continue;
             }
 
+            if (m_heldSpawns.erase(destroy_entity.networkedEntityId) > 0)
+            {
+                break; // gone before it spawned
+            }
+
             if (!m_networkedEntitiesLookup.contains(destroy_entity.networkedEntityId))
             {
                 SDK->logger->WarnF(PLUGIN, "Have no spawned entity for %llu", destroy_entity.networkedEntityId);
                 continue;
             }
 
-            const auto entityId = m_networkedEntitiesLookup[destroy_entity.networkedEntityId];
-            if (!Red::CallVirtual(this, "DestroyTransientEntity", entityId))
+            DestroyNow(destroy_entity.networkedEntityId);
+        }
+        break;
+
+        case EMessageTypeClientbound::EntityLook:
+        {
+            EntityLook look = {};
+            if (zpp::bits::failure(in(look)))
             {
-                SDK->logger->Warn(PLUGIN, "Failed to destroy entity!");
+                SDK->logger->Error(PLUGIN, "Faulty packet: EntityLook");
+                break;
             }
 
-            m_networkedEntitiesLookup.erase(entityId);
+            // So the hair's stored parts are in memory when the puppet is built.
+            Cyberverse::PlayerSync::LookParts::Get().Prepare(Cyberverse::PlayerSync::LookTable::Get().Resolve(look.appearance));
+
+            RED4ext::ent::EntityID entityId;
+            if (const auto held = m_heldSpawns.find(look.networkedEntityId); held != m_heldSpawns.end())
+            {
+                const auto packet = held->second.packet;
+                m_heldSpawns.erase(held);
+                entityId = SpawnNow(packet, &look.appearance);
+            }
+            else if (const auto found = m_networkedEntitiesLookup.find(look.networkedEntityId);
+                     found != m_networkedEntitiesLookup.end())
+            {
+                // A look for a V that's already there: changed at a mirror. Its hair can only be built while the
+                // engine builds the puppet, so the V is spawned again where it stands, with the new look.
+                if (look.appearance == LookOf(found->second).c_str())
+                {
+                    break; // the same look again: nothing to do
+                }
+                const auto spawned = m_spawned.find(look.networkedEntityId);
+                if (spawned == m_spawned.end())
+                {
+                    SDK->logger->WarnF(PLUGIN, "EntityLook: no spawn packet for networkId %llu", look.networkedEntityId);
+                    break;
+                }
+                const auto packet = spawned->second;
+                SDK->logger->InfoF(PLUGIN, "Look of networkId %llu changed; spawning its V again", look.networkedEntityId);
+                DestroyNow(look.networkedEntityId);
+                entityId = SpawnNow(packet, &look.appearance);
+            }
+            else
+            {
+                SDK->logger->WarnF(PLUGIN, "EntityLook for unknown networkedEntityId %llu", look.networkedEntityId);
+                break;
+            }
+            // The script side waits for the puppet to stream in and applies the rest (RemoteLook.reds, CYB-00029).
+            Red::CallVirtual(this, "OnEntityLook", entityId, Red::CString(look.appearance.c_str()));
         }
         break;
 

@@ -6,6 +6,7 @@ using Cyberverse.Server.Players;
 using Cyberverse.Server.Plugins;
 using Cyberverse.Server.Protocol;
 using Cyberverse.Server.Services;
+using Cyberverse.Server.TweakDb.Generated;
 using Cyberverse.Server.Types;
 using Microsoft.Extensions.DependencyInjection;
 using static Cyberverse.Server.Plugins.PluginHost;
@@ -184,6 +185,60 @@ public sealed class PlayerPacketHandlerTests : IDisposable
         Assert.True(_world.TryGetTransform(1, out var position, out var yaw));
         Assert.Equal(Home, position);
         Assert.Equal(45f, yaw);
+    }
+
+    [Fact]
+    public void ACharacterSpawnsAsVWithItsLookRightAfterTheSpawn()
+    {
+        Start(new FakeProvider());
+        AddPlayer(1, "alice");
+        AddPlayer(2, "bob");
+        Join(1, Home);
+        Join(2, Home);
+        // The tracker sends puppets to players who have a character of their own (it measures from there).
+        Assert.True(_world!.Spawn(2, new CharacterSpawn("c2", "Bo Example", Home, 0, "")));
+        const string look = "v1 body=f hairstyle=43 nose=6";
+
+        Assert.True(_world!.Spawn(1, new CharacterSpawn("c1", "Alex Example", Saved, 0, look)));
+
+        var entity = Assert.Single(OwnedBy(1));
+        Assert.Equal((ulong)Character.TPP_Player_Cutscene_No_Impostor_Female, entity.RecordId);
+        // Bob gets the puppet and then its look; alice gets nothing about her own puppet.
+        var toBob = _connections.Sent.Where(x => x.Connection == 2).Select(x => x.Packet).ToList();
+        var spawnAt = toBob.FindIndex(x => x is SpawnEntity spawn && spawn.NetworkedEntityId == entity.NetworkedEntityId);
+        Assert.True(spawnAt >= 0);
+        var sentLook = Assert.IsType<EntityLook>(toBob[spawnAt + 1]);
+        Assert.Equal(entity.NetworkedEntityId, sentLook.NetworkedEntityId);
+        Assert.Equal(look, sentLook.Appearance);
+        Assert.DoesNotContain(_connections.To<EntityLook>(1), x => x.NetworkedEntityId == entity.NetworkedEntityId);
+    }
+
+    [Fact]
+    public void AMaleOrEmptyLookSpawnsTheMaleV()
+    {
+        Assert.Equal(Character.TPP_Player_Cutscene_No_Impostor_Male, PlayerPacketHandler.RecordFor("v1 body=m nose=1"));
+        Assert.Equal(Character.TPP_Player_Cutscene_No_Impostor_Male, PlayerPacketHandler.RecordFor(""));
+        Assert.Equal(Character.TPP_Player_Cutscene_No_Impostor_Female, PlayerPacketHandler.RecordFor("v1 body=f"));
+    }
+
+    [Fact]
+    public void ANewLookReachesEveryoneWhoSeesTheCharacter()
+    {
+        Start(new FakeProvider());
+        AddPlayer(1, "alice");
+        AddPlayer(2, "bob");
+        Join(1, Home);
+        Join(2, Home);
+        Assert.True(_world!.Spawn(2, new CharacterSpawn("c2", "Bo Example", Home, 0, "")));
+        Assert.True(_world.Spawn(1, new CharacterSpawn("c1", "Alex Example", Saved, 0, "v1 body=m hairstyle=43")));
+        var entity = Assert.Single(OwnedBy(1));
+
+        Assert.True(_world.ChangeLook(1, "v1 body=m hairstyle=45"));
+
+        Assert.Equal(["v1 body=m hairstyle=43", "v1 body=m hairstyle=45"],
+            _connections.To<EntityLook>(2).Where(x => x.NetworkedEntityId == entity.NetworkedEntityId).Select(x => x.Appearance));
+        Assert.Equal("v1 body=m hairstyle=45", _world.CharacterOf(1)?.Appearance);
+        Assert.False(_world.ChangeLook(3, "v1 body=m")); // nobody on that connection
     }
 
     [Fact]

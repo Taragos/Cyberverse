@@ -165,6 +165,10 @@ which is cross-compiled with clang-cl, lld-link and the MSVC CRT/Windows SDK fet
 To join, start the game with `--cyberverse-server-address=<ip> --cyberverse-server-port=1337` (with Steam, after
 `%command%` in the launch options). Under Proton, RED4ext also needs `WINEDLLOVERRIDES="winmm,version=n,b"`.
 
+The client remembers the browser login per server. Two clients on one PC share it (under Proton, as long as they use
+the same prefix), so the second join would log in as the same account and kick the first. For a second test client,
+add `--cyberverse-profile=<name>` (e.g. `b`): it keeps its own saved login and logs in with a second account.
+
 Files for the cross-build are in `client/red4ext/cross/`. Two choices there apply to the client in general:
 GameNetworkingSockets uses Windows' BCrypt instead of OpenSSL in both the Windows and the Linux build (an overlay port,
 since vcpkg can't build OpenSSL for Windows from Linux), and in the cross-build its dependencies (protobuf, abseil) are

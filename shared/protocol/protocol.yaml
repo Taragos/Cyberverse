@@ -241,3 +241,13 @@ clientbound:
       - position: Vector3
       - yaw: f32
       - appearance: { type: string, max: 16384 }
+  EntityLook:
+    id: 10
+    channel: 1
+    reliable: true
+    doc: >-
+      A player character's look, sent right after its SpawnEntity (same channel, so it arrives after it) and again when
+      its owner saves a new look. The client applies it to the V puppet through its look table (CYB-00029).
+    fields:
+      - networkedEntityId: u64
+      - appearance: { type: string, max: 16384, doc: "The stored look, \"v1 body=m name=value ...\"; empty: a default V" }

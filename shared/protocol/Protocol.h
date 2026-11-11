@@ -9,7 +9,7 @@
 #include <vector>
 
 /// A hash of protocol.yaml. The client sends it at login; the server rejects a different one.
-constexpr uint32_t PROTOCOL_VERSION_CURRENT = 0x26B8A6AD;
+constexpr uint32_t PROTOCOL_VERSION_CURRENT = 0x5A37A850;
 
 /// The 4 bytes in front of every packet. zpp_bits writes the struct, then the packet's fields.
 struct MessageFrame
@@ -48,6 +48,7 @@ enum class EMessageTypeClientbound : uint16_t
     CharacterList = 7,
     CharacterRequestFailed = 8,
     CharacterSpawned = 9,
+    EntityLook = 10,
 };
 
 /// ValidationFailed covers everything from a wrong password to being banned. Part of the frozen InitAuthResult.
@@ -492,6 +493,24 @@ struct CharacterSpawned
 
     static constexpr EMessageTypeClientbound MessageType = EMessageTypeClientbound::CharacterSpawned;
     static constexpr uint8_t Channel = 0;
+    static constexpr bool Reliable = true;
+
+    static void FillMessageFrame(MessageFrame& frame)
+    {
+        frame.channel_id = Channel;
+        frame.message_type = static_cast<uint16_t>(MessageType);
+    }
+};
+
+/// A player character's look, sent right after its SpawnEntity (same channel, so it arrives after it) and again when its owner saves a new look. The client applies it to the V puppet through its look table (CYB-00029).
+struct EntityLook
+{
+    uint64_t networkedEntityId{};
+    /// The stored look, "v1 body=m name=value ..."; empty: a default V. At most 16384 bytes.
+    std::string appearance{};
+
+    static constexpr EMessageTypeClientbound MessageType = EMessageTypeClientbound::EntityLook;
+    static constexpr uint8_t Channel = 1;
     static constexpr bool Reliable = true;
 
     static void FillMessageFrame(MessageFrame& frame)

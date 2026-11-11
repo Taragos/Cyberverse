@@ -15,16 +15,11 @@ namespace Cyberverse.Server.PacketHandling;
 /// Built-in plugin: players joining the world, moving, spawning cars and equipping items. A player's game joining the
 /// world goes to the <see cref="ICharacterProvider"/> (the characters plugin), which picks the character and spawns it
 /// through <see cref="IWorldService"/>. Without a provider the player spawns right away where their game loaded.
+/// Characters spawn as the game's V without impostor, with their look sent along (EntityLook, CYB-00029).
 /// </summary>
 public class PlayerPacketHandler : IPlugin, IWorldService
 {
     private static readonly Logger Logger = LogManager.GetCurrentClassLogger();
-    private static readonly Random Random = new();
-    private static readonly Character[] PossiblePlayerNpcChoice = [Character.Judy, Character.Panam, Character.Alt,
-        Character.Claire, Character.Dexter, Character.Evelyn, Character.Hanako, Character.Jackie,
-        Character.Mama_Welles, Character.Misty, Character.Stout, Character.Takemura, Character.Tbug,
-        Character.wakako_okada, Character.Yorinobu];
-    
     private EntityTracker? _tracker = null;
     private EntityService? _entities = null;
     private PlayerService? _players = null;
@@ -109,8 +104,10 @@ public class PlayerPacketHandler : IPlugin, IWorldService
         }
 
         var position = character.Position ?? state.GamePosition;
-        var choice = Random.Next(PossiblePlayerNpcChoice.Length);
-        var entity = _entities!.CreateEntity(PossiblePlayerNpcChoice[choice]);
+        // The game's own cutscene V without impostor, which copies nothing from the local player; each client puts the
+        // character's look on it (EntityLook, CYB-00029).
+        var entity = _entities!.CreateEntity(RecordFor(character.Appearance));
+        entity.Look = character.Appearance;
         entity.WorldTransform = position; // Spawn the entity at the right spot already
         entity.Yaw = character.Yaw;
         entity.NetworkIdOwner = connectionId;
@@ -137,6 +134,28 @@ public class PlayerPacketHandler : IPlugin, IWorldService
         _tracker!.UpdateTrackingOf(entity);
         Logger.Info($"{player.Name} plays {character.Name} (connection {connectionId})");
         _events!.Publish(new PlayerJoinedWorld(player, position));
+        return true;
+    }
+
+    /// <summary>The V record for a stored look: female when it says body=f, else male.</summary>
+    public static Character RecordFor(string appearance) =>
+        appearance.Split(' ').Contains("body=f")
+            ? Character.TPP_Player_Cutscene_No_Impostor_Female
+            : Character.TPP_Player_Cutscene_No_Impostor_Male;
+
+    public bool ChangeLook(uint connectionId, string appearance)
+    {
+        ArgumentNullException.ThrowIfNull(appearance);
+        if (!_inWorld.TryGetValue(connectionId, out var state) || state.Character is not { } character ||
+            state.EntityId is not { } id || !_entities!.SpawnedEntities.TryGetValue(id, out var entity))
+        {
+            return false;
+        }
+
+        // The body can't change at a mirror (CYB-00027), so the V record stays; only the look is sent again.
+        state.Character = character with { Appearance = appearance };
+        entity.Look = appearance;
+        _tracker!.UpdateLook(entity);
         return true;
     }
 

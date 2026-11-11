@@ -20,6 +20,11 @@ public class Entity
     public float Yaw;
     // TODO: Remove and derive from recordId
     public bool IsVehicle;
+    /// <summary>
+    /// A player character's stored look ("v1 body=m name=value ..."), sent to everyone who sees it (EntityLook,
+    /// CYB-00029); null for everything else.
+    /// </summary>
+    public string? Look;
 
     public Entity(ulong entityId, ulong recordId)
     {

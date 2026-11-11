@@ -38,4 +38,10 @@ public interface IWorldService
 
     /// <summary>Where the player's character entity is now, as the client last reported it. False without one.</summary>
     bool TryGetTransform(uint connectionId, out Vector3 position, out float yaw);
+
+    /// <summary>
+    /// The player saved a new look for the character they play (e.g. at a mirror): everyone who sees the character
+    /// gets it. False without a spawned character.
+    /// </summary>
+    bool ChangeLook(uint connectionId, string appearance);
 }

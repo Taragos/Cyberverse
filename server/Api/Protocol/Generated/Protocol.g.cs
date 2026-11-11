@@ -9,7 +9,7 @@ namespace Cyberverse.Server.Protocol;
 public static class ProtocolInfo
 {
     /// <summary>A hash of protocol.yaml. The client sends it at login; the server rejects a different one.</summary>
-    public const uint Version = 0x26B8A6AD;
+    public const uint Version = 0x5A37A850;
 }
 
 public enum EMessageTypeServerbound : ushort
@@ -41,6 +41,7 @@ public enum EMessageTypeClientbound : ushort
     CharacterList = 7,
     CharacterRequestFailed = 8,
     CharacterSpawned = 9,
+    EntityLook = 10,
 }
 
 /// <summary>ValidationFailed covers everything from a wrong password to being banned. Part of the frozen InitAuthResult.</summary>
@@ -773,6 +774,33 @@ public partial struct CharacterSpawned : IClientBoundPacket<CharacterSpawned>
         if (!reader.TryReadBool(out value.Teleport)) return false;
         if (!Vector3.TryRead(ref reader, out value.Position)) return false;
         if (!reader.TryReadF32(out value.Yaw)) return false;
+        if (!reader.TryReadString(16384, out value.Appearance)) return false;
+        return true;
+    }
+}
+
+/// <summary>A player character's look, sent right after its SpawnEntity (same channel, so it arrives after it) and again when its owner saves a new look. The client applies it to the V puppet through its look table (CYB-00029).</summary>
+public partial struct EntityLook : IClientBoundPacket<EntityLook>
+{
+    public static ushort MessageId => 10;
+    public static byte Channel => 1;
+    public static bool Reliable => true;
+    public static EMessageTypeClientbound MessageType => EMessageTypeClientbound.EntityLook;
+
+    public ulong NetworkedEntityId;
+    /// <summary>The stored look, "v1 body=m name=value ..."; empty: a default V. At most 16384 bytes.</summary>
+    public string Appearance;
+
+    public readonly void Write(PacketWriter writer)
+    {
+        writer.WriteU64(NetworkedEntityId);
+        writer.WriteString(Appearance, 16384);
+    }
+
+    public static bool TryRead(ref PacketReader reader, out EntityLook value)
+    {
+        value = default;
+        if (!reader.TryReadU64(out value.NetworkedEntityId)) return false;
         if (!reader.TryReadString(16384, out value.Appearance)) return false;
         return true;
     }

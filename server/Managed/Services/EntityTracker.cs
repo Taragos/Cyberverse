@@ -36,6 +36,28 @@ public class EntityTracker
             SpawnPosition = entity.WorldTransform
         };
         _connections.Send(connectionId, spawnEntity);
+        if (entity.Look != null)
+        {
+            // Same channel as SpawnEntity, so the client gets it after the spawn.
+            _connections.Send(connectionId, new EntityLook { NetworkedEntityId = entity.NetworkedEntityId, Appearance = entity.Look });
+        }
+    }
+
+    /// <summary>Sends a player character's new look to everyone who sees the entity (CYB-00029).</summary>
+    public void UpdateLook(Entity entity)
+    {
+        if (entity.Look == null)
+        {
+            return;
+        }
+
+        foreach (var (connectionId, tracked) in _trackedEntities)
+        {
+            if (tracked.Contains(entity.NetworkedEntityId))
+            {
+                _connections.Send(connectionId, new EntityLook { NetworkedEntityId = entity.NetworkedEntityId, Appearance = entity.Look });
+            }
+        }
     }
 
     private void SendDespawnPacket(ulong networkEntityId, uint connectionId)

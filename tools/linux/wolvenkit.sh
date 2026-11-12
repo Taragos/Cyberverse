@@ -4,6 +4,7 @@
 # digest GitHub publishes for the release. 10.0.0-beta.1 is the first version that reads game 2.5's files (CYB-00029).
 #
 #   tools/linux/wolvenkit.sh --help
+#   tools/linux/wolvenkit.sh --dir
 #   tools/linux/wolvenkit.sh archive "<game>/archive/pc/content" -l -w "*.inkcharcustomization"
 #
 # Needs the .NET 10 runtime. WOLVENKIT_DIR overrides the install folder.
@@ -28,5 +29,8 @@ if [[ ! -x "$cli" ]]; then
     unzip -q -o "$download/$asset" -d "$dir"
     chmod +x "$cli"
 fi
+
+# --dir prints the install folder, for tools that load WolvenKit's libraries (tools/remote-puppet/AnimImport).
+[[ "${1:-}" == "--dir" ]] && { echo "$dir"; exit 0; }
 
 exec "$cli" "$@"

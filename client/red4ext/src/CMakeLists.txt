@@ -7,6 +7,7 @@ set(PROJECT_HEADER_FILES
   PlayerActionTracker.h
         PlayerSync/InterpolationData.h
         PlayerSync/RemoteLocomotion.h
+        PlayerSync/RemoteMotion.h
         PlayerSync/LookParts.h
         PlayerSync/LookTypes.h
         PlayerSync/LookTable.h

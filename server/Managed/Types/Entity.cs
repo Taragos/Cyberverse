@@ -25,6 +25,17 @@ public class Entity
     /// CYB-00029); null for everything else.
     /// </summary>
     public string? Look;
+    /// <summary>
+    /// A player's character: moved by their PlayerPositionUpdate and sent to others as EntityMovement (CYB-00010).
+    /// </summary>
+    public bool IsCharacter;
+    /// <summary>A character's horizontal speed in m/s, from the last PlayerPositionUpdate.</summary>
+    public float Speed;
+    public EMovementState MovementState;
+    /// <summary>The owner's clock in milliseconds at the last PlayerPositionUpdate.</summary>
+    public uint MovementTime;
+    /// <summary>Counts the character's movement updates, for the EntityMovement sequence; 0 before the first.</summary>
+    public uint MovementSequence;
 
     public Entity(ulong entityId, ulong recordId)
     {

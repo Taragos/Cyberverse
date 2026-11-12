@@ -10,6 +10,7 @@
 
 #include "PlayerActionTracker.h"
 #include "PlayerSync/InterpolationData.h"
+#include "PlayerSync/RemoteMotion.h"
 #include "PlayerSync/LookTypes.h"
 #include "PlayerSync/RemoteLocomotion.h"
 #include "RED4ext/Scripting/Natives/Generated/AI/Command.hpp"
@@ -56,10 +57,21 @@ private:
     float m_remoteLookTimer = 0.0f; // seconds since TickRemoteLooks last ran
     std::map<RED4ext::ent::EntityID, InterpolationData> m_interpolationData;
     std::map<RED4ext::ent::EntityID, RED4ext::Handle<RED4ext::AICommand>> m_LastTeleportCommand;
-    float m_TimeSinceLastPlayerPositionSync;
+    float m_TimeSinceLastPlayerPositionSync = 0.0f;
+    // The local player's movement as sent (CYB-00010): the sequence of the last update, and the speed smoothed every
+    // frame from the position.
+    uint32_t m_movementSequence = 0;
+    RED4ext::Vector4 m_lastLocalPosition{};
+    bool m_hasLastLocalPosition = false;
+    float m_localSpeed = 0.0f;
+    // Other players' characters (EntityMovement): where they are shown, about 100 ms behind (CYB-00010).
+    Cyberverse::PlayerSync::RemoteMotion<RED4ext::ent::EntityID> m_remoteMotion;
+    std::map<RED4ext::ent::EntityID, Cyberverse::PlayerSync::MotionSample> m_shownMotion; // as last applied
     // Remote puppets' walk animation (CYB-00010), and the plugin's clock in seconds.
     Cyberverse::PlayerSync::RemoteLocomotion m_remoteLocomotion;
     float m_clock = 0.0f;
+    /// A steady clock in seconds, for the movement updates' send and receive times.
+    static double SteadySeconds();
     // Written on a network worker thread, taken by the main menu on the UI thread.
     std::mutex m_loginRejectedMutex;
     std::string m_loginRejectedMessage;
@@ -86,11 +98,15 @@ private:
     void SendLogin();
     void OnNetworkUpdate(RED4ext::FrameInfo& frame_info, RED4ext::JobQueue& job_queue);
     void InterpolatePuppets(float deltaTime);
+    /// Moves other players' characters to where RemoteMotion shows them now and hands their movement to the animation.
+    void MoveRemoteCharacters();
     void SetEntityPosition(RED4ext::ent::EntityID entityId, RED4ext::Vector4 worldPosition, float yaw);
 
 protected:
     void PollIncomingMessages();
     void TrackPlayerPosition(float deltaTime);
+    /// The local player's EMovementState, from the game's detailed locomotion state.
+    EMovementState LocalMovementState();
 
 public:
     bool FullyConnected = false;

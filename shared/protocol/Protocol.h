@@ -9,7 +9,7 @@
 #include <vector>
 
 /// A hash of protocol.yaml. The client sends it at login; the server rejects a different one.
-constexpr uint32_t PROTOCOL_VERSION_CURRENT = 0x5A37A850;
+constexpr uint32_t PROTOCOL_VERSION_CURRENT = 0x2EE0EB79;
 
 /// The 4 bytes in front of every packet. zpp_bits writes the struct, then the packet's fields.
 struct MessageFrame
@@ -49,6 +49,7 @@ enum class EMessageTypeClientbound : uint16_t
     CharacterRequestFailed = 8,
     CharacterSpawned = 9,
     EntityLook = 10,
+    EntityMovement = 11,
 };
 
 /// ValidationFailed covers everything from a wrong password to being banned. Part of the frozen InitAuthResult.
@@ -63,6 +64,19 @@ enum class EPlayerAction : uint8_t
 {
     Jump,
     RangedAttack,
+};
+
+/// What a player's body is doing, from the game's detailed locomotion state (gamePSMDetailedLocomotionStates). Stand covers walking and running too; the speed tells them apart (CYB-00010).
+enum class EMovementState : uint8_t
+{
+    Stand,
+    Crouch,
+    Sprint,
+    Jump,
+    Fall,
+    Slide,
+    Dodge,
+    Climb,
 };
 
 struct Vector3
@@ -138,14 +152,22 @@ struct PlayerActionTracked
     }
 };
 
+/// The player's position and movement, 20 times a second. Unreliable: a lost one is replaced by the next, and the server drops one whose sequence isn't newer than the last it took (CYB-00010).
 struct PlayerPositionUpdate
 {
+    /// Counts up by one per update, from 1 for each connection.
+    uint32_t sequence{};
+    /// The client's clock in milliseconds when it sent the update.
+    uint32_t time{};
     Vector3 worldTransform{};
     float yaw{};
+    /// Horizontal speed in m/s, smoothed over about 0.1 s.
+    float speed{};
+    EMovementState state{};
 
     static constexpr EMessageTypeServerbound MessageType = EMessageTypeServerbound::PlayerPositionUpdate;
     static constexpr uint8_t Channel = 1;
-    static constexpr bool Reliable = true;
+    static constexpr bool Reliable = false;
 
     static void FillMessageFrame(MessageFrame& frame)
     {
@@ -512,6 +534,31 @@ struct EntityLook
     static constexpr EMessageTypeClientbound MessageType = EMessageTypeClientbound::EntityLook;
     static constexpr uint8_t Channel = 1;
     static constexpr bool Reliable = true;
+
+    static void FillMessageFrame(MessageFrame& frame)
+    {
+        frame.channel_id = Channel;
+        frame.message_type = static_cast<uint16_t>(MessageType);
+    }
+};
+
+/// Another player's character moved: their PlayerPositionUpdate, passed on to everyone who sees the character, in place of TeleportEntity. The client drops one whose sequence isn't newer than the last it got for this entity and shows the character about 100 ms behind, interpolating between updates (CYB-00010).
+struct EntityMovement
+{
+    uint64_t networkedEntityId{};
+    /// The server's own count per entity, from 1.
+    uint32_t sequence{};
+    /// The owner's clock in milliseconds from their PlayerPositionUpdate, to space the updates evenly.
+    uint32_t time{};
+    Vector3 position{};
+    float yaw{};
+    /// Horizontal speed in m/s.
+    float speed{};
+    EMovementState state{};
+
+    static constexpr EMessageTypeClientbound MessageType = EMessageTypeClientbound::EntityMovement;
+    static constexpr uint8_t Channel = 1;
+    static constexpr bool Reliable = false;
 
     static void FillMessageFrame(MessageFrame& frame)
     {

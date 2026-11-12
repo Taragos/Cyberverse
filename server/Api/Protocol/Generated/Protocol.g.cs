@@ -9,7 +9,7 @@ namespace Cyberverse.Server.Protocol;
 public static class ProtocolInfo
 {
     /// <summary>A hash of protocol.yaml. The client sends it at login; the server rejects a different one.</summary>
-    public const uint Version = 0x5A37A850;
+    public const uint Version = 0x2EE0EB79;
 }
 
 public enum EMessageTypeServerbound : ushort
@@ -42,6 +42,7 @@ public enum EMessageTypeClientbound : ushort
     CharacterRequestFailed = 8,
     CharacterSpawned = 9,
     EntityLook = 10,
+    EntityMovement = 11,
 }
 
 /// <summary>ValidationFailed covers everything from a wrong password to being banned. Part of the frozen InitAuthResult.</summary>
@@ -56,6 +57,19 @@ public enum EPlayerAction : byte
 {
     Jump,
     RangedAttack,
+}
+
+/// <summary>What a player's body is doing, from the game's detailed locomotion state (gamePSMDetailedLocomotionStates). Stand covers walking and running too; the speed tells them apart (CYB-00010).</summary>
+public enum EMovementState : byte
+{
+    Stand,
+    Crouch,
+    Sprint,
+    Jump,
+    Fall,
+    Slide,
+    Dodge,
+    Climb,
 }
 
 public static class EnumCodec
@@ -79,6 +93,16 @@ public static class EnumCodec
     }
 
     public static void Write(PacketWriter writer, EPlayerAction value) => writer.WriteU8((byte)value);
+
+    public static bool TryRead(ref PacketReader reader, out EMovementState value)
+    {
+        value = default;
+        if (!reader.TryReadU8(out var raw) || raw > 7) return false;
+        value = (EMovementState)raw;
+        return true;
+    }
+
+    public static void Write(PacketWriter writer, EMovementState value) => writer.WriteU8((byte)value);
 }
 
 public partial struct Vector3 : IWireType<Vector3>
@@ -213,27 +237,43 @@ public partial struct PlayerActionTracked : IServerBoundPacket<PlayerActionTrack
     }
 }
 
+/// <summary>The player's position and movement, 20 times a second. Unreliable: a lost one is replaced by the next, and the server drops one whose sequence isn't newer than the last it took (CYB-00010).</summary>
 public partial struct PlayerPositionUpdate : IServerBoundPacket<PlayerPositionUpdate>
 {
     public static ushort MessageId => 3;
     public static byte Channel => 1;
-    public static bool Reliable => true;
+    public static bool Reliable => false;
     public static EMessageTypeServerbound MessageType => EMessageTypeServerbound.PlayerPositionUpdate;
 
+    /// <summary>Counts up by one per update, from 1 for each connection.</summary>
+    public uint Sequence;
+    /// <summary>The client's clock in milliseconds when it sent the update.</summary>
+    public uint Time;
     public Vector3 WorldTransform;
     public float Yaw;
+    /// <summary>Horizontal speed in m/s, smoothed over about 0.1 s.</summary>
+    public float Speed;
+    public EMovementState State;
 
     public readonly void Write(PacketWriter writer)
     {
+        writer.WriteU32(Sequence);
+        writer.WriteU32(Time);
         WorldTransform.Write(writer);
         writer.WriteF32(Yaw);
+        writer.WriteF32(Speed);
+        EnumCodec.Write(writer, State);
     }
 
     public static bool TryRead(ref PacketReader reader, out PlayerPositionUpdate value)
     {
         value = default;
+        if (!reader.TryReadU32(out value.Sequence)) return false;
+        if (!reader.TryReadU32(out value.Time)) return false;
         if (!Vector3.TryRead(ref reader, out value.WorldTransform)) return false;
         if (!reader.TryReadF32(out value.Yaw)) return false;
+        if (!reader.TryReadF32(out value.Speed)) return false;
+        if (!EnumCodec.TryRead(ref reader, out value.State)) return false;
         return true;
     }
 }
@@ -802,6 +842,50 @@ public partial struct EntityLook : IClientBoundPacket<EntityLook>
         value = default;
         if (!reader.TryReadU64(out value.NetworkedEntityId)) return false;
         if (!reader.TryReadString(16384, out value.Appearance)) return false;
+        return true;
+    }
+}
+
+/// <summary>Another player's character moved: their PlayerPositionUpdate, passed on to everyone who sees the character, in place of TeleportEntity. The client drops one whose sequence isn't newer than the last it got for this entity and shows the character about 100 ms behind, interpolating between updates (CYB-00010).</summary>
+public partial struct EntityMovement : IClientBoundPacket<EntityMovement>
+{
+    public static ushort MessageId => 11;
+    public static byte Channel => 1;
+    public static bool Reliable => false;
+    public static EMessageTypeClientbound MessageType => EMessageTypeClientbound.EntityMovement;
+
+    public ulong NetworkedEntityId;
+    /// <summary>The server's own count per entity, from 1.</summary>
+    public uint Sequence;
+    /// <summary>The owner's clock in milliseconds from their PlayerPositionUpdate, to space the updates evenly.</summary>
+    public uint Time;
+    public Vector3 Position;
+    public float Yaw;
+    /// <summary>Horizontal speed in m/s.</summary>
+    public float Speed;
+    public EMovementState State;
+
+    public readonly void Write(PacketWriter writer)
+    {
+        writer.WriteU64(NetworkedEntityId);
+        writer.WriteU32(Sequence);
+        writer.WriteU32(Time);
+        Position.Write(writer);
+        writer.WriteF32(Yaw);
+        writer.WriteF32(Speed);
+        EnumCodec.Write(writer, State);
+    }
+
+    public static bool TryRead(ref PacketReader reader, out EntityMovement value)
+    {
+        value = default;
+        if (!reader.TryReadU64(out value.NetworkedEntityId)) return false;
+        if (!reader.TryReadU32(out value.Sequence)) return false;
+        if (!reader.TryReadU32(out value.Time)) return false;
+        if (!Vector3.TryRead(ref reader, out value.Position)) return false;
+        if (!reader.TryReadF32(out value.Yaw)) return false;
+        if (!reader.TryReadF32(out value.Speed)) return false;
+        if (!EnumCodec.TryRead(ref reader, out value.State)) return false;
         return true;
     }
 }

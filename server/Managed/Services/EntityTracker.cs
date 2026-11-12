@@ -134,38 +134,47 @@ public class EntityTracker
 
     public void UpdateTrackingOf(Entity entity, Player player)
     {
-        // TODO: Challenge: Find the entity the player _currently_ wants to control. There could be multiple (e.g. in the car)
-        // TODO: here, it's even more dumb, as we need to find out the camera at some point
-        var playerEntities =
-            _entities.SpawnedEntities.Values.Where(tty => tty.NetworkIdOwner == player.ConnectionId);
-        foreach (var playerEntity in playerEntities)
+        // Distance from the player's character; before it spawned, from any entity they own (TODO: the camera, and
+        // the car while driving).
+        var viewer = _entities.SpawnedEntities.Values.FirstOrDefault(x => x.NetworkIdOwner == player.ConnectionId && x.IsCharacter)
+                     ?? _entities.SpawnedEntities.Values.FirstOrDefault(x => x.NetworkIdOwner == player.ConnectionId);
+        if (viewer == null)
         {
-            // TODO: Check for out of bounds.
-            var playerPosition = playerEntity.WorldTransform;
-            if (playerPosition.DistanceSquared(entity.WorldTransform) <= 100 * 100)
-            {
-                // OnStartTrackingEntity just skips on already tracked entities, so we can avoid checking that condition
-                // twice and just call it directly.
-                OnStartTrackingEntity(player, entity);
-
-                // TODO: In the future, we may not want to immediately update entities that have been recently spawned,
-                //  because if spawning and updating are different channels, update may arrive before spawning.
-                //  Though, the client should ignore updates for non existing/spawned entities.
-                var teleportEntity = new TeleportEntity
-                {
-                    NetworkedEntityId = entity.NetworkedEntityId,
-                    TargetPosition = entity.WorldTransform,
-                    Yaw = entity.Yaw
-                };
-
-                //Console.WriteLine($"[{DateTime.Now.ToLongTimeString()}] Teleporting {entity.networkedEntityId} for {player.ConnectionId}");
-                _connections.Send(player.ConnectionId, teleportEntity);
-            }
-            else
-            {
-                OnStopTrackingEntity(player, entity);
-            }
+            return;
         }
+
+        // TODO: Check for out of bounds.
+        if (viewer.WorldTransform.DistanceSquared(entity.WorldTransform) > 100 * 100)
+        {
+            OnStopTrackingEntity(player, entity);
+            return;
+        }
+
+        // OnStartTrackingEntity skips entities that are already tracked.
+        OnStartTrackingEntity(player, entity);
+
+        // The client ignores updates for entities it hasn't spawned yet, so one arriving before its spawn is harmless.
+        if (entity.IsCharacter)
+        {
+            _connections.Send(player.ConnectionId, new EntityMovement
+            {
+                NetworkedEntityId = entity.NetworkedEntityId,
+                Sequence = entity.MovementSequence,
+                Time = entity.MovementTime,
+                Position = entity.WorldTransform,
+                Yaw = entity.Yaw,
+                Speed = entity.Speed,
+                State = entity.MovementState,
+            });
+            return;
+        }
+
+        _connections.Send(player.ConnectionId, new TeleportEntity
+        {
+            NetworkedEntityId = entity.NetworkedEntityId,
+            TargetPosition = entity.WorldTransform,
+            Yaw = entity.Yaw
+        });
     }
 
     /// <summary>

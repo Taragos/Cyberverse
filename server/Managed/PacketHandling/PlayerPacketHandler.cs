@@ -40,6 +40,9 @@ public class PlayerPacketHandler : IPlugin, IWorldService
 
         /// <summary>The player was sent every entity near them since their game last loaded.</summary>
         public bool Synced;
+
+        /// <summary>The sequence of the last PlayerPositionUpdate taken; older ones are dropped.</summary>
+        public uint LastSequence;
     }
 
     public PluginInfo Info { get; } = new("player-sync", BuildInfo.ModVersion, "auth");
@@ -112,6 +115,7 @@ public class PlayerPacketHandler : IPlugin, IWorldService
         entity.WorldTransform = position; // Spawn the entity at the right spot already
         entity.Yaw = character.Yaw;
         entity.NetworkIdOwner = connectionId;
+        entity.IsCharacter = true;
         state.EntityId = entity.NetworkedEntityId;
         state.Character = character;
 
@@ -176,43 +180,33 @@ public class PlayerPacketHandler : IPlugin, IWorldService
         return false;
     }
 
+    /// <summary>
+    /// Moves the player's character (only it: their car and items move on their own) and passes the movement on to
+    /// everyone who sees it. Updates arrive unreliably and may come out of order; one whose sequence isn't newer than
+    /// the last one taken is dropped (CYB-00010).
+    /// </summary>
     protected void HandlePositionUpdate(uint connectionId, PlayerPositionUpdate content)
     {
-        // // TODO: Implement differently, don't teleport.
-        // TeleportEntity teleportEntity = default;
-        // teleportEntity.networkedEntityId = 0;
-        // teleportEntity.targetPosition = positionUpdate.worldTransform;
-        // teleportEntity.yaw = positionUpdate.yaw;
-        //                         
-        // Message outputMessage = default;
-        // outputMessage.MessageTypeClientBound(EMessageTypeClientbound.TeleportEntity);
-        // outputMessage.channelId = 1;
-        // outputMessage.connectionId = message.connectionId;
-        // outputMessage.MarshalFrom(teleportEntity);
-        //
-        // EnqueueMessage(outputMessage);
-
-        var playerEntities =
-            _entities!.SpawnedEntities.Values.Where(tty => tty.NetworkIdOwner == connectionId);
-        foreach (var entity in playerEntities)
+        if (!_inWorld.TryGetValue(connectionId, out var state) || state.EntityId is not { } id ||
+            !_entities!.SpawnedEntities.TryGetValue(id, out var entity))
         {
-            //Console.WriteLine($"Move {player.Name} ({player.ConnectionId} / {message.connectionId}) to ({positionUpdate.WorldTransform.X}, {positionUpdate.WorldTransform.Y}, {positionUpdate.WorldTransform.Z})");
-            
-            // TODO: sometimes the game sends faulty updates to ~0, 3.16, 0.
-            // TODO: This is happening before the savegame has loaded. A better solution is to prevent updating networkEntityIds that are not spawned yet,
-            // because what happens here is that player.NetworkedEntityId is 0 because it has no entity yet, thus moving the old player.
-            // Note: this should already be solved.
-            if (content.WorldTransform.Z == 0 && content.WorldTransform.X == 0.010673523f)
-            {
-                // TODO: we should really remove that.
-                Logger.Trace("Skipping position update");
-                return;
-            }
-                    
-            entity.WorldTransform = content.WorldTransform;
-            entity.Yaw = content.Yaw;
-            _tracker!.UpdateTrackingOf(entity);
+            return;
         }
+
+        if (content.Sequence <= state.LastSequence)
+        {
+            Logger.Trace($"Dropped a late position update {content.Sequence} (last {state.LastSequence}) of connection {connectionId}");
+            return;
+        }
+
+        state.LastSequence = content.Sequence;
+        entity.WorldTransform = content.WorldTransform;
+        entity.Yaw = content.Yaw;
+        entity.Speed = content.Speed;
+        entity.MovementState = content.State;
+        entity.MovementTime = content.Time;
+        entity.MovementSequence++;
+        _tracker!.UpdateTrackingOf(entity);
     }
 
     protected void HandleSpawnCar(uint connectionId, PlayerSpawnCar content)

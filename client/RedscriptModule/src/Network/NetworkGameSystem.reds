@@ -124,17 +124,57 @@ public native class NetworkGameSystem extends IGameSystem {
     }
 
     // Remote puppets' walk animation (CYB-00010): the plugin builds the native AnimFeature_Locomotion each frame
-    // (redscript can't create it) and hands it here. Which input name the NPC graph reads isn't known yet, so it goes
-    // out under the candidates at once; only NPC puppets get it, not cars or items.
+    // (redscript can't create it) and hands it here. The NPC graph (humanoid.animgraph) reads it as "locomotion";
+    // only NPC puppets get it, not cars or items.
     public func ApplyLocomotion(entity: ref<Entity>, feature: ref<AnimFeature>) -> Void {
         let puppet = entity as NPCPuppet;
         if !IsDefined(puppet) {
             return;
         }
-        AnimationControllerComponent.ApplyFeature(puppet, n"Locomotion", feature);
         AnimationControllerComponent.ApplyFeature(puppet, n"locomotion", feature);
-        AnimationControllerComponent.ApplyFeature(puppet, n"LocomotionFeature", feature);
-        AnimationControllerComponent.ApplyFeature(puppet, n"Movement", feature);
+    }
+
+    // A remote player crouched or stood up (CYB-00010): the NPC stance, and the crouch animation set.
+    public func ApplyStance(entity: ref<Entity>, crouching: Bool) -> Void {
+        let puppet = entity as NPCPuppet;
+        if !IsDefined(puppet) {
+            return;
+        }
+        NPCPuppet.ChangeStanceState(puppet, crouching ? gamedataNPCStanceState.Crouch : gamedataNPCStanceState.Stand);
+        // Switches the remote V template's crouch animation set on or off (cyberverse_crouch in
+        // tools/remote-puppet/transform.py): the player's crouch idle and crouch walks under the standing names.
+        AnimationControllerComponent.SetAnimWrapperWeight(puppet, n"cyberverse_crouch", crouching ? 1.0 : 0.0);
+    }
+
+    // Switches the remote V template's run animation set on or off (cyberverse_run): the player's backward and
+    // sideways jogs under the walk names, for moving that way faster than a walk (CYB-00010).
+    public func ApplyRun(entity: ref<Entity>, running: Bool) -> Void {
+        let puppet = entity as NPCPuppet;
+        if !IsDefined(puppet) {
+            return;
+        }
+        AnimationControllerComponent.SetAnimWrapperWeight(puppet, n"cyberverse_run", running ? 1.0 : 0.0);
+    }
+
+    // The local player's detailed locomotion state (gamePSMDetailedLocomotionStates as an Int32), sent with each
+    // position update (CYB-00010); -1 when the player isn't in the world.
+    public func LocalLocomotionState() -> Int32 {
+        let player = GetPlayer(GetGameInstance());
+        if !IsDefined(player) {
+            return -1;
+        }
+        let blackboard = player.GetPlayerStateMachineBlackboard();
+        if !IsDefined(blackboard) {
+            return -1;
+        }
+        let detailed = blackboard.GetInt(GetAllBlackboardDefs().PlayerStateMachine.LocomotionDetailed);
+        // With walk toggled on, the game's StandEvents sets the detailed state to Crouch while the player stands
+        // (it borrows the crouch speed). Only the coarse state tells the two apart: it is Crouch in a real crouch.
+        if detailed == EnumInt(gamePSMDetailedLocomotionStates.Crouch)
+            && blackboard.GetInt(GetAllBlackboardDefs().PlayerStateMachine.Locomotion) != EnumInt(gamePSMLocomotionStates.Crouch) {
+            return EnumInt(gamePSMDetailedLocomotionStates.Stand);
+        }
+        return detailed;
     }
 
     // The length of one of the puppet's animations in seconds (e.g. walk_0); 0 or less when unknown.

@@ -14,7 +14,10 @@ using static Cyberverse.Server.Plugins.PluginHost;
 
 namespace Cyberverse.Server.Tests;
 
-/// <summary>A player's game joining the world, the character provider, and one character entity per player (CYB-00009).</summary>
+/// <summary>
+/// A player's game joining the world, the character provider, and one character entity per player (CYB-00009); moving
+/// it (CYB-00010).
+/// </summary>
 public sealed class PlayerPacketHandlerTests : IDisposable
 {
     private readonly string _configDirectory = Path.Combine(Path.GetTempPath(), "cyberverse-tests-" + Guid.NewGuid());
@@ -182,7 +185,7 @@ public sealed class PlayerPacketHandlerTests : IDisposable
         Assert.Equal("{}", spawned.Appearance);
         Assert.Equal("c1", _world.CharacterOf(1)?.CharacterId);
 
-        Send(1, new PlayerPositionUpdate { WorldTransform = Home, Yaw = 45 });
+        Send(1, new PlayerPositionUpdate { Sequence = 1, WorldTransform = Home, Yaw = 45 });
         Assert.True(_world.TryGetTransform(1, out var position, out var yaw));
         Assert.Equal(Home, position);
         Assert.Equal(45f, yaw);
@@ -273,5 +276,83 @@ public sealed class PlayerPacketHandlerTests : IDisposable
 
         Assert.Null(_world!.CharacterOf(1));
         Assert.False(_world.Spawn(1, new CharacterSpawn("c1", "Alex Example", Saved, 0, "")));
+    }
+
+    private static PlayerPositionUpdate Move(uint sequence, float x, float speed = 0, EMovementState state = EMovementState.Stand) =>
+        new() { Sequence = sequence, Time = sequence * 50, WorldTransform = Home with { X = x }, Yaw = 30, Speed = speed, State = state };
+
+    /// <summary>Alice and bob both play a character next to each other.</summary>
+    private Entity TwoPlayersNextToEachOther()
+    {
+        Start(null);
+        AddPlayer(1, "alice");
+        AddPlayer(2, "bob");
+        Join(2, Home);
+        Join(1, Home);
+        return Assert.Single(OwnedBy(1));
+    }
+
+    [Fact]
+    public void MovementReachesEveryoneWhoSeesTheCharacter()
+    {
+        var alice = TwoPlayersNextToEachOther();
+
+        Send(1, Move(1, 101, 1.5f));
+        Send(1, Move(2, 103, 4.2f, EMovementState.Sprint));
+
+        var toBob = _connections.To<EntityMovement>(2).Where(x => x.NetworkedEntityId == alice.NetworkedEntityId).ToList();
+        // The spawn sent one at sequence 0, then one per update.
+        Assert.Equal([0u, 1u, 2u], toBob.Select(x => x.Sequence));
+        var last = toBob[^1];
+        Assert.Equal(103f, last.Position.X);
+        Assert.Equal(30f, last.Yaw);
+        Assert.Equal(4.2f, last.Speed);
+        Assert.Equal(100u, last.Time);
+        Assert.Equal(EMovementState.Sprint, last.State);
+        // Characters move by EntityMovement only, and alice hears nothing about her own.
+        Assert.DoesNotContain(_connections.To<TeleportEntity>(2), x => x.NetworkedEntityId == alice.NetworkedEntityId);
+        Assert.DoesNotContain(_connections.To<EntityMovement>(1), x => x.NetworkedEntityId == alice.NetworkedEntityId);
+    }
+
+    [Fact]
+    public void ALateUpdateIsDropped()
+    {
+        var alice = TwoPlayersNextToEachOther();
+        Send(1, Move(5, 105));
+        var sent = _connections.Sent.Count;
+
+        Send(1, Move(4, 104)); // overtaken by 5
+        Send(1, Move(5, 106)); // a duplicate
+
+        Assert.Equal(105f, alice.WorldTransform.X);
+        Assert.Equal(sent, _connections.Sent.Count);
+        Send(1, Move(6, 107));
+        Assert.Equal(107f, alice.WorldTransform.X);
+    }
+
+    [Fact]
+    public void AnUpdateBeforeTheCharacterSpawnedIsIgnored()
+    {
+        Start(new FakeProvider());
+        AddPlayer(1, "alice");
+        Join(1, Home);
+
+        Send(1, Move(1, 0.010673523f)); // the loading screen's position near (0, 3.16, 0)
+
+        Assert.Empty(OwnedBy(1));
+        Assert.Empty(_connections.Sent.Where(x => x.Packet is EntityMovement or TeleportEntity));
+    }
+
+    [Fact]
+    public void MovingLeavesThePlayersCarWhereItIs()
+    {
+        var alice = TwoPlayersNextToEachOther();
+        Send(1, new PlayerSpawnCar { WorldTransform = Saved, Yaw = 0, RecordId = 1 });
+        var car = Assert.Single(OwnedBy(1), x => x.IsVehicle);
+
+        Send(1, Move(1, 120));
+
+        Assert.Equal(120f, alice.WorldTransform.X);
+        Assert.Equal(Saved, car.WorldTransform);
     }
 }

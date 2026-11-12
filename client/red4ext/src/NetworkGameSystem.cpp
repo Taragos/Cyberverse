@@ -11,6 +11,7 @@
 #include "RED4ext/RTTISystem.hpp"
 #include "RED4ext/Scripting/Natives/Generated/EulerAngles.hpp"
 #include "RED4ext/Scripting/Natives/Generated/red/ResourceReferenceScriptToken.hpp"
+#include "RED4ext/Scripting/Natives/Generated/game/PSMDetailedLocomotionStates.hpp"
 #include "RED4ext/Scripting/Natives/Generated/game/TeleportationFacility.hpp"
 #include "RED4ext/Scripting/Utils.hpp"
 #include "RED4ext/SystemUpdate.hpp"
@@ -30,6 +31,7 @@
 
 #include <algorithm>
 #include <array>
+#include <chrono>
 #include <cmath>
 #include <thread>
 
@@ -183,7 +185,8 @@ void NetworkGameSystem::OnNetworkUpdate(RED4ext::FrameInfo& frame_info, RED4ext:
     SpawnHeldEntities();
     TrackPlayerPosition(frame_info.deltaTime);
     InterpolatePuppets(frame_info.deltaTime);
-    m_remoteLocomotion.Tick(this, frame_info.deltaTime, m_clock);
+    MoveRemoteCharacters();
+    m_remoteLocomotion.Tick(this, frame_info.deltaTime);
 
     // Remote looks waiting for their puppet (RemoteLookQueue in RemoteLook.reds): stepped from here, not from the
     // game's delay callbacks, which get lost while the local player enters the world.
@@ -479,6 +482,8 @@ void NetworkGameSystem::DestroyNow(const uint64_t networkedEntityId)
     m_spawned.erase(networkedEntityId);
     m_interpolationData.erase(entityId);
     m_LastTeleportCommand.erase(entityId);
+    m_remoteMotion.Forget(entityId);
+    m_shownMotion.erase(entityId);
     m_remoteLocomotion.Forget(entityId);
     std::lock_guard lock(m_looksMutex);
     m_looks.erase(entityId.hash);
@@ -665,6 +670,7 @@ void NetworkGameSystem::PollIncomingMessages()
             case EAuthResult::Ok:
                 SDK->logger->Info(PLUGIN, "Login accepted");
                 FullyConnected = true;
+                m_movementSequence = 0; // the server counts each connection's updates from 1
                 if (m_hasEnqueuedLoadLastCheckpoint && m_systemRequestsHandler)
                 {
                     SDK->logger->Info(PLUGIN, "Loading the savegame");
@@ -812,13 +818,42 @@ void NetworkGameSystem::PollIncomingMessages()
                 Red::CallVirtual(this, "StopAICommand", entity.value(), commandRef);
             }
 
-            m_remoteLocomotion.OnNetworkPosition(
-                entityId, {teleport.targetPosition.x, teleport.targetPosition.y, teleport.targetPosition.z}, m_clock);
-
             // TODO: This should probably be a map<id, list<data>>, so that a server that eagerly sends too much data doesn't increase interpolation delay
             //  in contrast, we can just increase the time velocity of the interpolator
             const auto interpolation_data = InterpolationData(Cyberverse::Utils::Vector4To3(positionSource), teleport.targetPosition, yawSource, teleport.yaw, 0.1f);
             m_interpolationData[entityId] = interpolation_data;
+        }
+        break;
+
+        case EMessageTypeClientbound::EntityMovement:
+        {
+            EntityMovement movement = {};
+            if (zpp::bits::failure(in(movement)))
+            {
+                SDK->logger->Error(PLUGIN, "Faulty packet: EntityMovement");
+                pIncomingMsg->Release();
+                continue;
+            }
+
+            if (const auto held = m_heldSpawns.find(movement.networkedEntityId); held != m_heldSpawns.end())
+            {
+                held->second.packet.spawnPosition = movement.position; // spawns where it is by then
+                break;
+            }
+
+            const auto known = m_networkedEntitiesLookup.find(movement.networkedEntityId);
+            if (known == m_networkedEntitiesLookup.end())
+            {
+                break; // unreliable: may overtake its SpawnEntity, or come after its DestroyEntity
+            }
+
+            const Cyberverse::PlayerSync::MotionSample sample{movement.position.x, movement.position.y,
+                                                              movement.position.z, movement.yaw,
+                                                              movement.speed, static_cast<uint8_t>(movement.state)};
+            if (m_remoteMotion.Push(known->second, movement.sequence, movement.time, SteadySeconds(), sample))
+            {
+                m_spawned[movement.networkedEntityId].spawnPosition = movement.position; // a respawn goes here
+            }
         }
         break;
 
@@ -982,29 +1017,113 @@ bool NetworkGameSystem::OnGameRestored()
     return res;
 }
 
+double NetworkGameSystem::SteadySeconds()
+{
+    return std::chrono::duration<double>(std::chrono::steady_clock::now().time_since_epoch()).count();
+}
+
+EMovementState NetworkGameSystem::LocalMovementState()
+{
+    using Detailed = RED4ext::game::PSMDetailedLocomotionStates;
+    int32_t detailed = -1;
+    Red::CallVirtual(this, "LocalLocomotionState", detailed);
+    switch (static_cast<Detailed>(detailed))
+    {
+    case Detailed::Crouch:
+    case Detailed::CrouchSprint: return EMovementState::Crouch;
+    case Detailed::Sprint:
+    case Detailed::LadderSprint: return EMovementState::Sprint;
+    case Detailed::Jump:
+    case Detailed::DoubleJump:
+    case Detailed::ChargeJump:
+    case Detailed::HoverJump:
+    case Detailed::LadderJump: return EMovementState::Jump;
+    case Detailed::Fall:
+    case Detailed::AirThrusters:
+    case Detailed::AirHover:
+    case Detailed::SuperheroFall: return EMovementState::Fall;
+    case Detailed::Slide:
+    case Detailed::SlideFall:
+    case Detailed::LadderSlide: return EMovementState::Slide;
+    case Detailed::Dodge:
+    case Detailed::DodgeAir: return EMovementState::Dodge;
+    case Detailed::Climb:
+    case Detailed::Vault:
+    case Detailed::Ladder: return EMovementState::Climb;
+    default: return EMovementState::Stand; // walking, landing, aiming, knocked down, not in the world
+    }
+}
+
 void NetworkGameSystem::TrackPlayerPosition(float deltaTime)
 {
     // Nothing to send to before the login is accepted, or after the server closed the connection.
     if (!FullyConnected)
     {
+        m_hasLastLocalPosition = false;
         return;
     }
 
+    const auto player = Cyberverse::Utils::GetPlayer();
+    const auto position = Cyberverse::Utils::Entity_GetWorldPosition(player);
+
+    // The horizontal speed, every frame, smoothed over about 0.1 s. A jump of more than 30 m/s is a teleport (a
+    // fast travel, a reload) and doesn't count.
+    if (m_hasLastLocalPosition && deltaTime > 0.0f)
+    {
+        const auto dx = position.X - m_lastLocalPosition.X;
+        const auto dy = position.Y - m_lastLocalPosition.Y;
+        const auto speed = std::sqrt(dx * dx + dy * dy) / deltaTime;
+        if (speed < 30.0f)
+        {
+            m_localSpeed += (speed - m_localSpeed) * std::min(1.0f, deltaTime / 0.1f);
+        }
+    }
+    m_lastLocalPosition = position;
+    m_hasLastLocalPosition = true;
+
+    // 20 updates a second on average; after a long frame the next one goes out at once, but they don't pile up.
+    constexpr float Interval = 0.05f;
     m_TimeSinceLastPlayerPositionSync += deltaTime;
-    if (m_TimeSinceLastPlayerPositionSync < 0.1f /* update rate*/)
+    if (m_TimeSinceLastPlayerPositionSync < Interval)
     {
         return;
     }
+    m_TimeSinceLastPlayerPositionSync = std::min(m_TimeSinceLastPlayerPositionSync - Interval, Interval);
 
-    m_TimeSinceLastPlayerPositionSync = 0.0f;
-
-    const auto player = Cyberverse::Utils::GetPlayer();
-    const auto [X, Y, Z, W] = Cyberverse::Utils::Entity_GetWorldPosition(player);
     const auto orientation = Cyberverse::Utils::Entity_GetWorldOrientation(player);
     const auto [Roll, Pitch, Yaw] = Cyberverse::Utils::Quaternion_ToEulerAngles(orientation);
 
-    const PlayerPositionUpdate position_update = { {  X, Y, Z }, Yaw};
-    this->EnqueueMessage(position_update);
+    PlayerPositionUpdate update = {};
+    update.sequence = ++m_movementSequence;
+    update.time = static_cast<uint32_t>(static_cast<uint64_t>(SteadySeconds() * 1000.0));
+    update.worldTransform = {position.X, position.Y, position.Z};
+    update.yaw = Yaw;
+    update.speed = m_localSpeed;
+    update.state = LocalMovementState();
+    this->EnqueueMessage(update);
+}
+
+void NetworkGameSystem::MoveRemoteCharacters()
+{
+    const auto now = SteadySeconds();
+    m_remoteMotion.ForEachKey([&](const RED4ext::ent::EntityID& entityId) {
+        const auto sample = m_remoteMotion.Sample(entityId, now);
+        if (!sample.has_value())
+        {
+            return;
+        }
+        m_remoteLocomotion.SetMovement(entityId, sample->speed, sample->state, sample->yaw, sample->vx, sample->vy);
+
+        // Standing still: no new teleport command each frame.
+        const auto [shown, isNew] = m_shownMotion.try_emplace(entityId, *sample);
+        if (!isNew && shown->second.x == sample->x && shown->second.y == sample->y && shown->second.z == sample->z &&
+            shown->second.yaw == sample->yaw)
+        {
+            return;
+        }
+        shown->second = *sample;
+        SetEntityPosition(entityId, {sample->x, sample->y, sample->z, 1.0f}, sample->yaw);
+    });
 }
 
 void NetworkGameSystem::InterpolatePuppets(const float deltaTime)

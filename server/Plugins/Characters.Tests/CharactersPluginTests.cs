@@ -250,7 +250,7 @@ public sealed class CharactersPluginTests(PostgresFixture postgres) : IDisposabl
         Assert.Equal("{\"hair\":3}", first.Appearance);
         Assert.Single(_entities.SpawnedEntities.Values, x => x.NetworkIdOwner == 1);
 
-        Send(1, new PlayerPositionUpdate { WorldTransform = Walked, Yaw = 270 });
+        Send(1, new PlayerPositionUpdate { Sequence = 1, WorldTransform = Walked, Yaw = 270 });
         Disconnect(1);
         var saved = await WaitFor(() => Stored("acc-1", "Alex Example"), c => c.PositionX != null);
         Assert.Equal((Walked.X, Walked.Y, Walked.Z, 270f), (saved.PositionX, saved.PositionY, saved.PositionZ, saved.Yaw));
@@ -273,13 +273,13 @@ public sealed class CharactersPluginTests(PostgresFixture postgres) : IDisposabl
         await JoinGame(1);
         var alex = (await Create(1, "Alex", "Example")).Characters.Single();
         await Select(1, alex.CharacterId);
-        Send(1, new PlayerPositionUpdate { WorldTransform = Walked, Yaw = 90 });
+        Send(1, new PlayerPositionUpdate { Sequence = 1, WorldTransform = Walked, Yaw = 90 });
 
         _events.Publish(new ServerTick(_now));
         var saved = await WaitFor(() => Stored("acc-1", "Alex Example"), c => c.PositionX != null);
         Assert.Equal(Walked.X, saved.PositionX);
 
-        Send(1, new PlayerPositionUpdate { WorldTransform = GameLoaded, Yaw = 90 });
+        Send(1, new PlayerPositionUpdate { Sequence = 2, WorldTransform = GameLoaded, Yaw = 90 });
         _events.Publish(new ServerTick(_now.AddSeconds(30))); // not due yet
         await Task.Delay(200);
         Assert.Equal(Walked.X, (await Stored("acc-1", "Alex Example")).PositionX);
@@ -296,7 +296,7 @@ public sealed class CharactersPluginTests(PostgresFixture postgres) : IDisposabl
         await JoinGame(1);
         var alex = (await Create(1, "Alex", "Example")).Characters.Single();
         await Select(1, alex.CharacterId);
-        Send(1, new PlayerPositionUpdate { WorldTransform = Walked, Yaw = 10 });
+        Send(1, new PlayerPositionUpdate { Sequence = 1, WorldTransform = Walked, Yaw = 10 });
         var lists = _connections.To<CharacterList>(1).Count;
 
         var again = Next<CharacterSpawned>(1);

@@ -32,6 +32,12 @@ enums:
   EPlayerAction:
     type: u8
     values: [Jump, RangedAttack]
+  EMovementState:
+    type: u8
+    values: [Stand, Crouch, Sprint, Jump, Fall, Slide, Dodge, Climb]
+    doc: >-
+      What a player's body is doing, from the game's detailed locomotion state (gamePSMDetailedLocomotionStates). Stand
+      covers walking and running too; the speed tells them apart (CYB-00010).
 
 structs:
   Vector3:
@@ -74,10 +80,17 @@ serverbound:
   PlayerPositionUpdate:
     id: 3
     channel: 1
-    reliable: true
+    reliable: false
+    doc: >-
+      The player's position and movement, 20 times a second. Unreliable: a lost one is replaced by the next, and the
+      server drops one whose sequence isn't newer than the last it took (CYB-00010).
     fields:
+      - sequence: { type: u32, doc: "Counts up by one per update, from 1 for each connection" }
+      - time: { type: u32, doc: "The client's clock in milliseconds when it sent the update" }
       - worldTransform: Vector3
       - yaw: f32
+      - speed: { type: f32, doc: "Horizontal speed in m/s, smoothed over about 0.1 s" }
+      - state: EMovementState
   PlayerSpawnCar:
     id: 4
     channel: 0
@@ -251,3 +264,19 @@ clientbound:
     fields:
       - networkedEntityId: u64
       - appearance: { type: string, max: 16384, doc: "The stored look, \"v1 body=m name=value ...\"; empty: a default V" }
+  EntityMovement:
+    id: 11
+    channel: 1
+    reliable: false
+    doc: >-
+      Another player's character moved: their PlayerPositionUpdate, passed on to everyone who sees the character, in
+      place of TeleportEntity. The client drops one whose sequence isn't newer than the last it got for this entity
+      and shows the character about 100 ms behind, interpolating between updates (CYB-00010).
+    fields:
+      - networkedEntityId: u64
+      - sequence: { type: u32, doc: "The server's own count per entity, from 1" }
+      - time: { type: u32, doc: "The owner's clock in milliseconds from their PlayerPositionUpdate, to space the updates evenly" }
+      - position: Vector3
+      - yaw: f32
+      - speed: { type: f32, doc: "Horizontal speed in m/s" }
+      - state: EMovementState

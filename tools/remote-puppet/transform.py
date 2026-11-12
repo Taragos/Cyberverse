@@ -5,13 +5,16 @@ controllers copy the local player's look onto every remote V, and whose root ani
 doll, which doesn't read AnimFeature_Locomotion (remote Vs slid instead of walking). This script writes copies with:
 
 - every gameuiCharacterCustomization*Controller removed, so nothing of the local look reaches the remote V;
-- the root animated component's graph swapped for the NPC one of man_base.ent / woman_base.ent (humanoid.animgraph),
-  which uses the same rig (man_base.rig / woman_base.rig) and reads AnimFeature_Locomotion; the NPC base's animation
-  sets are added to V's own (vehicle seats etc.), V's entries win on a clash;
+- the root animated component's graph swapped for our copy of the NPC one of man_base.ent / woman_base.ent
+  (humanoid.animgraph with blends between locomotion animations, see patch_graph.py), which uses the same rig
+  (man_base.rig / woman_base.rig) and reads AnimFeature_Locomotion; the NPC base's animation sets are added to V's
+  own (vehicle seats etc.), V's entries win on a clash;
 - an ungated locomotion set (idle_stand, walk_0, sprint_0, idle_to_walk_0, ...). The NPC bases have their locomotion
   only behind variables (LowCorpLocomotion etc.) that a story NPC's own template or appearance sets; without one the
   graph has nothing to play and the puppet stands in its bind pose (T-pose). Panam's template adds
-  wa_gang_unarmed_locomotion_relaxed.anims the same way.
+  wa_gang_unarmed_locomotion_relaxed.anims the same way;
+- in front of it, the player's own locomotion moved to the NPC skeleton, and its crouch animations behind a
+  variable (CYB-00010; see LOCOMOTION below).
 
 Both the editable component list and the compiled copy the engine loads (compiledData) are changed the same way.
 
@@ -29,12 +32,35 @@ TEMPLATES = {
     "remote_v_ma.ent.json": ("player_ma_tpp_cutscene_no_impostor.ent.json", "man_base.ent.json"),
     "remote_v_wa.ent.json": ("player_wa_tpp_cutscene_no_impostor.ent.json", "woman_base.ent.json"),
 }
-# Output file -> the locomotion set it plays without any variable, at Panam's priority.
+# Output file -> the locomotion sets, each (path, priority, variables). A lower priority number wins (the game's own
+# stealth set is at 10, generic reactions at 200); a set with variables only counts while one of them is switched on.
+# - crouch, in front while CROUCH_VARIABLE is on (the client switches it, NetworkGameSystem.ApplyStance): the
+#   player's crouch idle and crouch walks under the standing names;
+# - run, in front while RUN_VARIABLE is on (NetworkGameSystem.ApplyRun): the player's backward and sideways jogs
+#   under the walk names, as the graph has backward and sideways movement in its walk style only;
+# - locomotion: the player's own walk, jog and sprint with starts and stops, in up to eight directions;
+# - the NPC gang set at Panam's priority, behind them: fills in what the player's lacks (stairs, turns on the spot).
+# The two player sets are the game's player_locomotion.anims moved to the NPC skeleton (build.sh, retarget_anims.py).
+CROUCH_VARIABLE = "cyberverse_crouch"
+RUN_VARIABLE = "cyberverse_run"
+OWN = "cyberverse\\animations\\"
+NPC = "base\\animations\\npc\\gameplay\\"
 LOCOMOTION = {
-    "remote_v_ma.ent.json": "base\\animations\\npc\\gameplay\\man_average\\gang\\unarmed\\ma_gang_unarmed_locomotion_relaxed.anims",
-    "remote_v_wa.ent.json": "base\\animations\\npc\\gameplay\\woman_average\\gang\\unarmed\\wa_gang_unarmed_locomotion_relaxed.anims",
+    "remote_v_ma.ent.json": [
+        (OWN + "remote_v_ma_crouch.anims", 5, [CROUCH_VARIABLE]),
+        (OWN + "remote_v_ma_run.anims", 6, [RUN_VARIABLE]),
+        (OWN + "remote_v_ma_locomotion.anims", 126, []),
+        (NPC + "man_average\\gang\\unarmed\\ma_gang_unarmed_locomotion_relaxed.anims", 127, []),
+    ],
+    "remote_v_wa.ent.json": [
+        (OWN + "remote_v_wa_crouch.anims", 5, [CROUCH_VARIABLE]),
+        (OWN + "remote_v_wa_run.anims", 6, [RUN_VARIABLE]),
+        (OWN + "remote_v_wa_locomotion.anims", 126, []),
+        (NPC + "woman_average\\gang\\unarmed\\wa_gang_unarmed_locomotion_relaxed.anims", 127, []),
+    ],
 }
-LOCOMOTION_PRIORITY = 127
+NPC_GRAPH = "base\\gameplay\\anim_graphs\\humanoid.animgraph"
+GRAPH = "cyberverse\\animations\\remote_v.animgraph"
 DROP_PREFIX = "gameuiCharacterCustomization"
 ROOT = "root"
 
@@ -77,12 +103,12 @@ def find_root(components, where):
     return roots[0]
 
 
-def locomotion_entry(path):
+def locomotion_entry(path, priority, variables):
     return {
         "$type": "animAnimSetupEntry",
         "animSet": {"DepotPath": {"$type": "ResourcePath", "$storage": "string", "$value": path}, "Flags": "Default"},
-        "priority": LOCOMOTION_PRIORITY,
-        "variableNames": [],
+        "priority": priority,
+        "variableNames": [{"$type": "CName", "$storage": "string", "$value": v} for v in variables],
     }
 
 
@@ -100,11 +126,14 @@ def transform_components(components, npc_root, locomotion, where):
     root = find_root(components, where)
     if root["rig"]["DepotPath"]["$value"] != npc_root["rig"]["DepotPath"]["$value"]:
         raise SystemExit(f"{where}: V's rig {root['rig']['DepotPath']['$value']} isn't the NPC base's rig")
+    if npc_root["graph"]["DepotPath"]["$value"] != NPC_GRAPH:
+        raise SystemExit(f"{where}: the NPC base's graph is {npc_root['graph']['DepotPath']['$value']}, not {NPC_GRAPH}")
     root["graph"] = json.loads(json.dumps(npc_root["graph"]))
+    root["graph"]["DepotPath"]["$value"] = GRAPH
     own = root["animations"]["gameplay"]
     known = {anim_set(e) for e in own}
     own.extend(json.loads(json.dumps(e)) for e in npc_root["animations"]["gameplay"] if anim_set(e) not in known)
-    own.append(locomotion_entry(locomotion))
+    own.extend(locomotion_entry(*entry) for entry in locomotion)
     return [cname(c["name"]) for c in dropped]
 
 
@@ -150,7 +179,7 @@ def main(src, dst):
         with open(os.path.join(dst, out), "w", encoding="utf-8") as f:
             json.dump(doc, f, indent=2)
         print(f"{out}: dropped {len(editable)} customization controllers, root graph "
-              f"{npc_root['graph']['DepotPath']['$value']}", file=sys.stderr)
+              f"{GRAPH}", file=sys.stderr)
 
 
 if __name__ == "__main__":
